@@ -1,0 +1,8 @@
+import {encryptSecret} from '@/lib/credentials';
+import {apiError,getOfficeId,supabaseAdmin} from '@/lib/supabase-server';
+
+export async function GET(){try{const db=supabaseAdmin(),officeId=await getOfficeId(),result=await db.from('integration_credentials').select('provider,config,enabled,updated_at').eq('office_id',officeId);if(result.error)throw new Error(result.error.message);return Response.json({integrations:result.data||[]})}catch(error){return apiError(error)}}
+export async function PUT(req:Request){try{const body=await req.json(),provider=body.provider;if(!['evolution','gmail'].includes(provider))return Response.json({error:'Provedor inválido.'},{status:400});const db=supabaseAdmin(),officeId=await getOfficeId();let config:Record<string,string>,secrets:Record<string,string>;
+if(provider==='evolution'){if(!body.baseUrl||!body.instance||!body.apiKey)throw new Error('URL, instância e API key são obrigatórias.');config={baseUrl:String(body.baseUrl).replace(/\/$/,''),instance:String(body.instance)};secrets={apiKey:String(body.apiKey)}}
+else{if(!body.clientId||!body.clientSecret||!body.refreshToken||!body.fromEmail)throw new Error('Client ID, Client Secret, Refresh Token e e-mail remetente são obrigatórios.');config={fromEmail:String(body.fromEmail)};secrets={clientId:String(body.clientId),clientSecret:String(body.clientSecret),refreshToken:String(body.refreshToken)}}
+const result=await db.from('integration_credentials').upsert({office_id:officeId,provider,config,encrypted_secret:encryptSecret(secrets),enabled:body.enabled!==false},{onConflict:'office_id,provider'});if(result.error)throw new Error(result.error.message);return Response.json({saved:true})}catch(error){return apiError(error,400)}}

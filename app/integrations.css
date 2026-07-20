@@ -1,0 +1,1 @@
+.integration-grid{display:grid;grid-template-columns:repeat(3,minmax(280px,1fr));gap:18px;align-items:start}.integration-grid .settings{max-width:none}.integration-grid .btn{width:100%;margin-top:10px}@media(max-width:1100px){.integration-grid{grid-template-columns:1fr}}

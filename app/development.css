@@ -1,0 +1,21 @@
+.development-state {
+  min-height: 600px;
+  height: auto;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+}
+
+.development-state img {
+  display: block;
+  width: min(610px, 100%);
+  height: auto;
+  border-radius: 12px;
+}
+
+@media (max-width: 720px) {
+  .development-state {
+    min-height: 480px;
+  }
+}
