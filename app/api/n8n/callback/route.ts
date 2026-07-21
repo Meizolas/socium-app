@@ -1,5 +1,5 @@
 import {apiError,supabaseAdmin} from '@/lib/supabase-server';
-import {sendGmail,sendWhatsApp} from '@/lib/deliveries';
+import {attemptDocumentDelivery} from '@/lib/deliveries';
 import {normalizeCnpj} from '@/lib/format';
 export async function POST(req:Request){
   if(!process.env.N8N_CALLBACK_SECRET||req.headers.get('x-callback-secret')!==process.env.N8N_CALLBACK_SECRET)return Response.json({error:'Não autorizado'},{status:401});
@@ -19,17 +19,7 @@ export async function POST(req:Request){
     const document=await db.from('documents').update(documentChanges).eq('id',current.data.document_id);
     if(document.error)throw new Error(document.error.message);
     if(!clientId&&p.cnpj)await db.from('alerts').insert({office_id:current.data.office_id,document_id:current.data.document_id,type:'Cliente não localizado',severity:'Atenção',title:`CNPJ ${p.cnpj} não cadastrado`});
-    if(clientId&&!failed&&status==='Pronto para envio'){
-      const client=await db.from('clients').select('preference').eq('id',clientId).single(),preference=client.data?.preference||'';
-      const tasks:Promise<unknown>[]=[];
-      if(/e-mail|email/i.test(preference))tasks.push(sendGmail(current.data.document_id));
-      if(/whatsapp/i.test(preference))tasks.push(sendWhatsApp(current.data.document_id));
-      const results=await Promise.allSettled(tasks),errors=results.filter((r):r is PromiseRejectedResult=>r.status==='rejected').map(r=>String(r.reason)),sent=results.filter(r=>r.status==='fulfilled'&&r.value===true).length,unavailable=results.filter(r=>r.status==='fulfilled'&&r.value!==true).length;
-      if(errors.length)await db.from('alerts').insert({office_id:current.data.office_id,document_id:current.data.document_id,type:'Falha de envio',severity:'Crítico',title:errors.join(' | ').slice(0,300)});
-      if(unavailable||tasks.length===0)await db.from('alerts').insert({office_id:current.data.office_id,document_id:current.data.document_id,type:'Integração não configurada',severity:'Atenção',title:'Documento pronto, mas o canal de envio ainda não está configurado.'});
-      const deliveryStatus=tasks.length>0&&sent===tasks.length?'Enviado':sent>0?'Parcial':'Pronto para envio';
-      await db.from('documents').update({status:deliveryStatus}).eq('id',current.data.document_id);
-    }
+    if(clientId&&!failed&&status==='Pronto para envio')await attemptDocumentDelivery(current.data.document_id);
     return Response.json({received:true,processingId});
   }catch(error){return apiError(error)}
 }
