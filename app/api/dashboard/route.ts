@@ -15,7 +15,7 @@ export async function GET(){
     const jobs=(documents.data||[]).map(d=>({
       id:d.id,file:d.final_name||d.original_name,size:'—',client:d.client_id?clientMap.get(d.client_id)?.legal_name||'Cliente não identificado':'Cliente não identificado',
       cnpj:d.extracted_cnpj||'',stage:processingMap.get(d.id)?.status||d.status,progress:processingMap.get(d.id)?.progress||0,
-      status:d.status,time:new Date(d.updated_at||d.created_at).toLocaleString('pt-BR'),duration:'—',competence:d.competence
+      status:d.status,time:d.updated_at||d.created_at,duration:'—',competence:d.competence
     }));
     return Response.json({officeId,clients:clients.data||[],jobs,alerts:alerts.data||[]});
   }catch(error){return apiError(error)}
