@@ -55,9 +55,11 @@ export async function sendGmail(documentId:string){
 
 export async function attemptDocumentDelivery(documentId:string){
   const db=supabaseAdmin();
-  const document=await db.from('documents').select('id,office_id,status,clients(preference)').eq('id',documentId).single();
+  const document=await db.from('documents').select('id,office_id,status,clients(preference,auto_created,email,whatsapp)').eq('id',documentId).single();
   if(document.error)throw new Error(document.error.message);
   const client=Array.isArray(document.data.clients)?document.data.clients[0]:document.data.clients;
+  if(!client)return {status:'blocked',message:'Cliente não cadastrado. Cadastre o cliente e informe e-mail/WhatsApp antes de enviar.',results:[] as ChannelResult[]};
+  if(client.auto_created||(!client.email&&!client.whatsapp))return {status:'blocked',message:'Cadastro incompleto. Informe e-mail/WhatsApp e escolha a preferência de envio.',results:[] as ChannelResult[]};
   const preference=String(client?.preference||'Envio manual');
   const channels:Channel[]=[];
   if(/e-mail|email/i.test(preference))channels.push('email');

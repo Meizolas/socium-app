@@ -1,25 +1,108 @@
-import {apiError,supabaseAdmin} from '@/lib/supabase-server';
 import {attemptDocumentDelivery} from '@/lib/deliveries';
 import {normalizeCnpj} from '@/lib/format';
+import {apiError,supabaseAdmin} from '@/lib/supabase-server';
+
 export async function POST(req:Request){
   if(!process.env.N8N_CALLBACK_SECRET||req.headers.get('x-callback-secret')!==process.env.N8N_CALLBACK_SECRET)return Response.json({error:'Não autorizado'},{status:401});
+
+  let processingId='',documentId='',officeId='';
   try{
-    const p=await req.json(),db=supabaseAdmin(),processingId=String(p.processingId||'').replace(/^=/,'').trim();
+    const p=await req.json(),db=supabaseAdmin();
+    processingId=String(p.processingId||'').replace(/^=/,'').trim();
     if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(processingId))return Response.json({error:'processingId inválido'},{status:400});
+
     const current=await db.from('processings').select('document_id,office_id').eq('id',processingId).single();
     if(current.error)throw new Error(current.error.message);
-    let clientId:string|null=null;const cnpj=normalizeCnpj(p.cnpj);
-    if(cnpj){const found=await db.from('clients').select('id').eq('office_id',current.data.office_id).eq('cnpj',cnpj).maybeSingle();if(found.error)throw new Error(found.error.message);clientId=found.data?.id||null}
-    const failed=Boolean(p.errorMessage),status=failed?'Erro':p.currentStep&&p.currentStep<4?'Processando':'Pronto para envio';
-    const processing=await db.from('processings').update({current_step:Number(p.currentStep)||1,status,progress:failed?0:Math.min(100,Number(p.progress)||100),error_message:p.errorMessage||null,finished_at:failed||status==='Pronto para envio'?new Date().toISOString():null}).eq('id',processingId);
+    documentId=current.data.document_id;
+    officeId=current.data.office_id;
+
+    const finalName=String(p.finalName||'').replace(/^=/,'').trim();
+    const extractedShortName=String(p.shortName||'').replace(/^=/,'').trim().slice(0,120);
+    const nameFromFile=finalName.replace(/\.pdf$/i,'').split(/\s+-\s+/).slice(1,-1).join(' - ').trim();
+    const extractedLegalName=String(p.legalName||extractedShortName||nameFromFile).replace(/^=/,'').trim().slice(0,250);
+    let clientId:string|null=null,clientNeedsCompletion=false,clientWasCreated=false;
+    const cnpj=normalizeCnpj(p.cnpj);
+    if(cnpj){
+      const found=await db.from('clients').select('id,email,whatsapp,preference,auto_created').eq('office_id',officeId).eq('cnpj',cnpj).maybeSingle();
+      if(found.error)throw new Error(found.error.message);
+      if(found.data){
+        clientId=found.data.id;
+        clientNeedsCompletion=Boolean(found.data.auto_created||(!found.data.email&&!found.data.whatsapp));
+      }else if(extractedLegalName){
+        const created=await db.from('clients').insert({
+          office_id:officeId,
+          legal_name:extractedLegalName,
+          trade_name:extractedShortName||null,
+          cnpj,
+          email:null,
+          whatsapp:null,
+          preference:'Envio manual',
+          active:false,
+          auto_created:true,
+          notes:'Cadastro provisório criado automaticamente a partir de uma guia. Complete os contatos antes do envio.',
+        }).select('id').single();
+        if(created.error)throw new Error(created.error.message);
+        clientId=created.data.id;
+        clientNeedsCompletion=true;
+        clientWasCreated=true;
+      }
+    }
+
+    const failed=Boolean(p.errorMessage);
+    const status=failed?'Erro':p.currentStep&&p.currentStep<4?'Processando':'Pronto para envio';
+    const processing=await db.from('processings').update({
+      current_step:Number(p.currentStep)||1,
+      status,
+      progress:failed?0:Math.min(100,Number(p.progress)||100),
+      error_message:p.errorMessage||null,
+      finished_at:failed||status==='Pronto para envio'?new Date().toISOString():null,
+    }).eq('id',processingId);
     if(processing.error)throw new Error(processing.error.message);
-    const dateText=String(p.dueDate||''),dateMatch=dateText.match(/^(\d{2})\/(\d{2})\/(\d{4})$/),dueDate=dateMatch?`${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`:dateText||null,amountText=String(p.amount??'').replace(/[^0-9,.-]/g,''),amount=amountText?Number(amountText.includes(',')?amountText.replace(/\./g,'').replace(',','.'):amountText):null,finalName=String(p.finalName||'').replace(/^=/,'').trim();
-    const documentChanges:Record<string,unknown>={client_id:clientId,extracted_cnpj:cnpj||null,due_date:dueDate,amount:Number.isFinite(amount)?amount:null,final_name:finalName||null,status:clientId?status:'Revisão necessária'};
+
+    const dateText=String(p.dueDate||'');
+    const dateMatch=dateText.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    const dueDate=dateMatch?`${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`:dateText||null;
+    const amountText=String(p.amount??'').replace(/[^0-9,.-]/g,'');
+    const amount=amountText?Number(amountText.includes(',')?amountText.replace(/\./g,'').replace(',','.'):amountText):null;
+    const receivedType=String(p.type||'').replace(/^=/,'').trim().toUpperCase().slice(0,30);
+    const inferredType=String(finalName).match(/^(DAS|DARF|DAE|DAM|GPS|FGTS)\b/i)?.[1]?.toUpperCase();
+    const documentType=receivedType&&receivedType!=='GUIA'?receivedType:inferredType||'GUIA';
+    const documentChanges:Record<string,unknown>={
+      client_id:clientId,
+      extracted_cnpj:cnpj||null,
+      extracted_legal_name:extractedLegalName||null,
+      extracted_short_name:extractedShortName||null,
+      document_type:documentType||'GUIA',
+      due_date:dueDate,
+      amount:Number.isFinite(amount)?amount:null,
+      final_name:finalName||null,
+      status:clientId&&!clientNeedsCompletion?status:'Revisão necessária',
+    };
     if(/^\d{2}\/\d{4}$/.test(String(p.competence||'')))documentChanges.competence=p.competence;
-    const document=await db.from('documents').update(documentChanges).eq('id',current.data.document_id);
+    const document=await db.from('documents').update(documentChanges).eq('id',documentId);
     if(document.error)throw new Error(document.error.message);
-    if(!clientId&&p.cnpj)await db.from('alerts').insert({office_id:current.data.office_id,document_id:current.data.document_id,type:'Cliente não localizado',severity:'Atenção',title:`CNPJ ${p.cnpj} não cadastrado`});
-    if(clientId&&!failed&&status==='Pronto para envio')await attemptDocumentDelivery(current.data.document_id);
+
+    if(clientNeedsCompletion&&cnpj){
+      await db.from('alerts').insert({
+        office_id:officeId,
+        document_id:documentId,
+        type:clientWasCreated?'Cadastro provisório criado — complete os contatos':'Cadastro incompleto — envio bloqueado',
+        severity:'Atenção',
+        title:`${extractedLegalName||'Razão social extraída'} — CNPJ ${cnpj}. Informe e-mail/WhatsApp e escolha a preferência para liberar o envio.`,
+      });
+    }
+    if(clientId&&!clientNeedsCompletion&&!failed&&status==='Pronto para envio')await attemptDocumentDelivery(documentId);
     return Response.json({received:true,processingId});
-  }catch(error){return apiError(error)}
+  }catch(error){
+    const message=error instanceof Error?error.message:'Erro desconhecido no callback.';
+    if(processingId&&documentId&&officeId){
+      const db=supabaseAdmin();
+      await Promise.all([
+        db.from('processings').update({status:'Erro',progress:0,error_message:message,finished_at:new Date().toISOString()}).eq('id',processingId),
+        db.from('documents').update({status:'Erro'}).eq('id',documentId),
+        db.from('alerts').insert({office_id:officeId,document_id:documentId,type:'Erro no processamento',severity:'Crítico',title:message.slice(0,300)}),
+      ]);
+    }
+    return apiError(error);
+  }
 }

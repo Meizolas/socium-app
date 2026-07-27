@@ -12,6 +12,7 @@ export async function GET(){
     ]);
     for(const result of [clients,documents,processings,alerts,deliveries])if(result.error)throw new Error(result.error.message);
     const clientMap=new Map((clients.data||[]).map(client=>[client.id,client]));
+    const documentMap=new Map((documents.data||[]).map(document=>[document.id,document]));
     const processingMap=new Map((processings.data||[]).map(processing=>[processing.document_id,processing]));
     const deliveryMap=new Map<string,{email:boolean,whatsapp:boolean,hasError:boolean}>();
     for(const delivery of deliveries.data||[]){
@@ -28,8 +29,13 @@ export async function GET(){
       else if(delivery?.email)displayStatus=/whatsapp/i.test(preference)?'Parcial — enviado no e-mail':'Enviado no e-mail';
       else if(delivery?.whatsapp)displayStatus=/e-mail|email/i.test(preference)?'Parcial — enviado no WhatsApp':'Enviado no WhatsApp';
       else if(delivery?.hasError)displayStatus='Erro no envio';
-      return {id:document.id,file:document.final_name||document.original_name,size:'—',client:client?.legal_name||'Cliente não identificado',cnpj:document.extracted_cnpj||'',stage:processingMap.get(document.id)?.status||document.status,progress:processingMap.get(document.id)?.progress||0,status:displayStatus,time:document.updated_at||document.created_at,duration:'—',competence:document.competence};
+      const clientNeedsCompletion=Boolean(document.extracted_cnpj&&(!client||client.auto_created||(!client.email&&!client.whatsapp)));
+      if(!client&&document.extracted_cnpj)displayStatus='Cliente não cadastrado';
+      else if(clientNeedsCompletion)displayStatus='Cadastro incompleto';
+      const processing=processingMap.get(document.id);
+      return {id:document.id,file:document.final_name||document.original_name,type:document.document_type||'GUIA',size:'—',clientId:client?.id||null,client:client?.legal_name||document.extracted_legal_name||'Cliente não identificado',clientRegistered:Boolean(client),clientNeedsCompletion,cnpj:document.extracted_cnpj||'',stage:processing?.status||document.status,progress:processing?.progress||0,status:displayStatus,errorMessage:processing?.error_message||'',time:document.updated_at||document.created_at,duration:'—',competence:document.competence};
     });
-    return Response.json({officeId,clients:clients.data||[],jobs,alerts:alerts.data||[]});
+    const enrichedAlerts=(alerts.data||[]).map(alert=>{const document=alert.document_id?documentMap.get(alert.document_id):null;return {...alert,client_id:document?.client_id||null,cnpj:document?.extracted_cnpj||'',legal_name:document?.extracted_legal_name||''}});
+    return Response.json({officeId,clients:clients.data||[],jobs,alerts:enrichedAlerts});
   }catch(error){return apiError(error)}
 }

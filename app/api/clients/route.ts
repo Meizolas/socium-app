@@ -5,7 +5,8 @@ export async function POST(req:Request){
   try{
     const db=supabaseAdmin(),officeId=await getOfficeId(),body=await req.json();
     const cnpj=normalizeCnpj(body.cnpj);if(cnpj.length!==14)return Response.json({error:'CNPJ deve conter 14 dígitos.'},{status:400});
-    const payload={office_id:officeId,legal_name:body.name,trade_name:body.tradeName||null,cnpj,owner_name:body.owner||null,email:body.email||null,whatsapp:body.phone||null,preference:body.pref||'E-mail + WhatsApp',active:body.active!==false,notes:body.notes||null};
+    const hasContact=Boolean(String(body.email||'').trim()||String(body.phone||'').trim());
+    const payload={office_id:officeId,legal_name:body.name,trade_name:body.tradeName||null,cnpj,owner_name:body.owner||null,email:body.email||null,whatsapp:body.phone||null,preference:body.pref||'E-mail + WhatsApp',active:hasContact&&body.active!==false,auto_created:body.id?!hasContact:Boolean(body.autoCreated),notes:body.notes||null};
     const result=body.id?await db.from('clients').update(payload).eq('id',body.id).eq('office_id',officeId).select().single():await db.from('clients').insert(payload).select().single();
     if(result.error) throw new Error(result.error.message);
     return Response.json(result.data,{status:body.id?200:201});

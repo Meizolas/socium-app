@@ -1,12 +1,16 @@
 import {apiError,getOfficeId,supabaseAdmin} from '@/lib/supabase-server';
 
 export async function POST(_:Request,{params}:{params:Promise<{id:string}>}){
+  let documentId='',processingId='',officeId='';
   try{
-    const {id}=await params,db=supabaseAdmin(),officeId=await getOfficeId();
+    const {id}=await params,db=supabaseAdmin();
+    documentId=id;
+    officeId=await getOfficeId();
     const document=await db.from('documents').select('*').eq('id',id).eq('office_id',officeId).single();
     if(document.error)throw new Error(document.error.message);
     const processing=await db.from('processings').select('*').eq('document_id',id).eq('office_id',officeId).single();
     if(processing.error)throw new Error(processing.error.message);
+    processingId=processing.data.id;
     const signed=await db.storage.from('das-documents').createSignedUrl(document.data.storage_path,3600);
     if(signed.error)throw new Error(signed.error.message);
     if(!process.env.N8N_WEBHOOK_URL)throw new Error('N8N_WEBHOOK_URL não configurada.');
@@ -19,5 +23,16 @@ export async function POST(_:Request,{params}:{params:Promise<{id:string}>}){
     await db.from('attempts').insert({office_id:officeId,processing_id:processing.data.id,attempt,request:{documentId:id,originalName:document.data.original_name,competence:document.data.competence},response:{status:response.status,body}});
     if(!response.ok){await db.from('processings').update({status:'Erro',progress:0,error_message:`n8n respondeu ${response.status}: ${body.slice(0,300)}`}).eq('id',processing.data.id);await db.from('documents').update({status:'Erro'}).eq('id',id);return Response.json({error:`n8n respondeu ${response.status}`,details:body},{status:502})}
     return Response.json({ok:true,status:response.status,response:body});
-  }catch(error){return apiError(error)}
+  }catch(error){
+    const message=error instanceof Error?error.message:'Falha ao reprocessar.';
+    if(documentId&&processingId&&officeId){
+      const db=supabaseAdmin();
+      await Promise.all([
+        db.from('processings').update({status:'Erro',progress:0,error_message:message,finished_at:new Date().toISOString()}).eq('id',processingId),
+        db.from('documents').update({status:'Erro'}).eq('id',documentId),
+        db.from('alerts').insert({office_id:officeId,document_id:documentId,type:'Erro no reprocessamento',severity:'Crítico',title:message.slice(0,300)}),
+      ]);
+    }
+    return apiError(error);
+  }
 }
