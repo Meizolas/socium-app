@@ -19,7 +19,8 @@ export async function POST(req:Request){
     if(duplicate.data)return Response.json({error:'Este arquivo já foi importado.',documentId:duplicate.data.id},{status:409});
     const upload=await db.storage.from('das-documents').upload(path,bytes,{contentType:'application/pdf',upsert:false});
     if(upload.error)throw new Error(upload.error.message);
-    const document=await db.from('documents').insert({id,office_id:officeId,original_name:file.name,hash,storage_path:path,competence:String(form.get('competence')||''),status:'Na fila'}).select().single();
+    const batchId=String(form.get('batchId')||''),batchSize=Math.max(1,Number(form.get('batchSize'))||1);
+    const document=await db.from('documents').insert({id,office_id:officeId,original_name:file.name,hash,storage_path:path,batch_id:/^[0-9a-f-]{36}$/i.test(batchId)?batchId:null,batch_size:batchSize,competence:String(form.get('competence')||''),status:'Na fila'}).select().single();
     if(document.error){await db.storage.from('das-documents').remove([path]);throw new Error(document.error.message)}
     const processing=await db.from('processings').insert({office_id:officeId,document_id:id,status:'Na fila',progress:0}).select().single();
     if(processing.error)throw new Error(processing.error.message);

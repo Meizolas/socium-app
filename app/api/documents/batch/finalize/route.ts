@@ -1,0 +1,4 @@
+import {attemptBatchDelivery} from '@/lib/deliveries';
+import {apiError,getOfficeId,supabaseAdmin} from '@/lib/supabase-server';
+
+export async function POST(request:Request){try{const body=await request.json(),batchId=String(body.batchId||''),documentIds=Array.isArray(body.documentIds)?body.documentIds.map(String):[];if(!/^[0-9a-f-]{36}$/i.test(batchId))return Response.json({error:'Lote inválido.'},{status:400});const db=supabaseAdmin(),officeId=await getOfficeId();if(documentIds.length){const updated=await db.from('documents').update({batch_size:documentIds.length}).eq('office_id',officeId).eq('batch_id',batchId).in('id',documentIds);if(updated.error)throw new Error(updated.error.message);const result=await attemptBatchDelivery(batchId);return Response.json({finalized:true,...result})}return Response.json({finalized:true,waiting:false,groups:0})}catch(error){return apiError(error)}}

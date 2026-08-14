@@ -1,4 +1,4 @@
-import {attemptDocumentDelivery} from '@/lib/deliveries';
+import {attemptBatchDelivery,attemptDocumentDelivery} from '@/lib/deliveries';
 import {normalizeCnpj} from '@/lib/format';
 import {apiError,supabaseAdmin} from '@/lib/supabase-server';
 
@@ -11,7 +11,7 @@ export async function POST(req:Request){
     processingId=String(p.processingId||'').replace(/^=/,'').trim();
     if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(processingId))return Response.json({error:'processingId inválido'},{status:400});
 
-    const current=await db.from('processings').select('document_id,office_id').eq('id',processingId).single();
+    const current=await db.from('processings').select('document_id,office_id,documents(batch_id)').eq('id',processingId).single();
     if(current.error)throw new Error(current.error.message);
     documentId=current.data.document_id;
     officeId=current.data.office_id;
@@ -36,7 +36,7 @@ export async function POST(req:Request){
           cnpj,
           email:null,
           whatsapp:null,
-          preference:'Envio manual',
+          preference:'Somente e-mail',
           active:false,
           auto_created:true,
           notes:'Cadastro provisório criado automaticamente a partir de uma guia. Complete os contatos antes do envio.',
@@ -91,7 +91,11 @@ export async function POST(req:Request){
         title:`${extractedLegalName||'Razão social extraída'} — CNPJ ${cnpj}. Informe e-mail/WhatsApp e escolha a preferência para liberar o envio.`,
       });
     }
-    if(clientId&&!clientNeedsCompletion&&!failed&&status==='Pronto para envio')await attemptDocumentDelivery(documentId);
+    if(failed||status==='Pronto para envio'){
+      const relation=Array.isArray(current.data.documents)?current.data.documents[0]:current.data.documents;
+      if(relation?.batch_id)await attemptBatchDelivery(relation.batch_id);
+      else if(clientId&&!clientNeedsCompletion)await attemptDocumentDelivery(documentId);
+    }
     return Response.json({received:true,processingId});
   }catch(error){
     const message=error instanceof Error?error.message:'Erro desconhecido no callback.';

@@ -17,6 +17,7 @@ type Client = {
   cnpj: string;
   owner_name?: string;
   email?: string;
+  additional_emails?: string[];
   whatsapp?: string;
   preference?: string;
   active: boolean;
@@ -151,7 +152,7 @@ export function RealApp() {
   }, []);
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load(true), 5000);
+    const timer = window.setInterval(() => void load(true), 2000);
     return () => window.clearInterval(timer);
   }, [load]);
   const filteredJobs = useMemo(
@@ -731,32 +732,34 @@ function ImportPage({
 }) {
   const [files, setFiles] = useState<File[]>([]),
     [busy, setBusy] = useState(false),
+    [uploads,setUploads]=useState<Record<string,{progress:number,status:string,error?:string}>>({}),
     [messages, setMessages] = useState<string[]>([]);
   const input = useRef<HTMLInputElement>(null);
   async function process() {
     setBusy(true);
+    const batchId=crypto.randomUUID();
+    const uploadedIds:string[]=[];
     const output: string[] = [];
     for (const file of files) {
       const form = new FormData();
       form.append("file", file);
       form.append("competence", period);
+      form.append("batchId",batchId);
+      form.append("batchSize",String(files.length));
       try {
-        const response = await fetch("/api/documents", {
-            method: "POST",
-            body: form,
-          }),
-          body = await response.json();
-        output.push(
-          response.ok
-            ? `${file.name}: enviado para processamento`
-            : `${file.name}: ${body.error}`,
-        );
-      } catch {
-        output.push(`${file.name}: falha de conexão`);
+        setUploads(current=>({...current,[file.name]:{progress:0,status:"Preparando upload"}}));
+        const body=await new Promise<{id?:string}>((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open("POST","/api/documents");xhr.upload.onprogress=event=>{if(event.lengthComputable){const progress=Math.round(event.loaded/event.total*100);setUploads(current=>({...current,[file.name]:{progress,status:progress<100?"Enviando arquivo":"Armazenando no Supabase"}}))}};xhr.onload=()=>{let result;try{result=JSON.parse(xhr.responseText)}catch{result={error:"Resposta inválida do servidor."}}if(xhr.status>=200&&xhr.status<300)resolve(result);else reject(new Error(result.error||`Erro HTTP ${xhr.status}`))};xhr.onerror=()=>reject(new Error("Falha de conexão com o servidor."));xhr.send(form)});
+        setUploads(current=>({...current,[file.name]:{progress:100,status:"Aguardando processamento do n8n"}}));
+        if(body.id)uploadedIds.push(body.id);
+        output.push(`${file.name}: recebido e enviado ao n8n${body.id?` (documento ${body.id})`:""}`);
+      } catch(error) {
+        const detail=error instanceof Error?error.message:"Falha desconhecida";
+        setUploads(current=>({...current,[file.name]:{progress:0,status:"Erro",error:detail}}));
+        output.push(`${file.name}: ${detail}`);
       }
     }
     setMessages(output);
-    setFiles([]);
+    if(uploadedIds.length)await fetch("/api/documents/batch/finalize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({batchId,documentIds:uploadedIds})});
     setBusy(false);
     await refresh();
   }
@@ -798,7 +801,7 @@ function ImportPage({
         </b>
       </section>
       {files.length > 0 && (
-        <div className="upload-actions">
+        <><div className="uploads">{files.map(file=>{const state=uploads[file.name];return <div key={`${file.name}-${file.size}`}><I.FileText/><p><b>{file.name}</b><small>{state?.error||state?.status||"Pronto para enviar"}</small></p><div className="progress"><span style={{width:`${state?.progress||0}%`}}/></div><Badge status={state?.status||"Pronto"}/></div>})}</div><div className="upload-actions">
           <Button onClick={process} disabled={busy}>
             {busy ? (
               <>
@@ -809,7 +812,7 @@ function ImportPage({
               <>Iniciar processamento</>
             )}
           </Button>
-        </div>
+        </div></>
       )}
       {messages.map((m) => (
         <div className="resultline" key={m}>
@@ -1155,10 +1158,11 @@ function ClientModal({
       cnpj: client?.cnpj || defaults?.cnpj || "",
       owner: client?.owner_name || "",
       email: client?.email || "",
+      additionalEmails: (client?.additional_emails || []).join(", "),
       phone: client?.whatsapp || "",
       pref: client?.auto_created
         ? "Somente e-mail"
-        : client?.preference || "E-mail + WhatsApp",
+        : client?.preference || "Somente e-mail",
       notes: client?.notes || "",
     }),
     [error, setError] = useState(""),
@@ -1228,6 +1232,11 @@ function ClientModal({
         <label>
           E-mail
           <input type="email" value={form.email} onChange={change("email")} />
+        </label>
+        <label>
+          E-mails adicionais
+          <textarea value={form.additionalEmails} onChange={change("additionalEmails")} placeholder="financeiro@empresa.com, socio@empresa.com" />
+          <small>Separe os destinatários por vírgula, ponto e vírgula ou uma linha por e-mail. Todos receberão a mesma guia.</small>
         </label>
         <div>
           <label>
@@ -1309,6 +1318,11 @@ function Settings({ officeId }: { officeId: string }) {
     [gmailReady, setGmailReady] = useState(false),
     [gmailEmail, setGmailEmail] = useState(""),
     [gmailRedirect, setGmailRedirect] = useState(""),
+    [subjectTemplate,setSubjectTemplate]=useState("Guia {{tipo}} — {{competencia}} — {{cliente}}"),
+    [messageTemplate,setMessageTemplate]=useState("Olá,\n\nSegue em anexo a guia {{tipo}} referente à competência {{competencia}}, com vencimento em {{vencimento}}.\n\nAtenciosamente,\nSocium Contábil"),
+    [groupSubjectTemplate,setGroupSubjectTemplate]=useState("Guias {{tipos}} — {{competencias}} — {{cliente}}"),
+    [groupMessageTemplate,setGroupMessageTemplate]=useState("Olá,\n\nSeguem em anexo {{quantidade}} guias ({{tipos}}), referentes às competências {{competencias}}.\n\nAtenciosamente,\nSocium Contábil"),
+    [testing,setTesting]=useState(false),
     [message, setMessage] = useState("");
   useEffect(() => {
     fetch("/api/settings/integrations")
@@ -1321,11 +1335,12 @@ function Settings({ officeId }: { officeId: string }) {
         );
         setGmailReady(Boolean(b.gmailOAuthReady));
         setGmailRedirect(String(b.gmailRedirectUri || ""));
-        setGmailEmail(
-          (b.integrations || []).find(
-            (x: { provider: string }) => x.provider === "gmail",
-          )?.config?.fromEmail || "",
-        );
+        const gmail=(b.integrations||[]).find((x:{provider:string})=>x.provider==="gmail");
+        setGmailEmail(gmail?.config?.fromEmail||"");
+        if(gmail?.config?.subjectTemplate)setSubjectTemplate(gmail.config.subjectTemplate);
+        if(gmail?.config?.messageTemplate)setMessageTemplate(gmail.config.messageTemplate);
+        if(gmail?.config?.groupSubjectTemplate)setGroupSubjectTemplate(gmail.config.groupSubjectTemplate);
+        if(gmail?.config?.groupMessageTemplate)setGroupMessageTemplate(gmail.config.groupMessageTemplate);
       })
       .catch(() => {});
   }, []);
@@ -1358,6 +1373,8 @@ function Settings({ officeId }: { officeId: string }) {
     setMessage("Credenciais salvas e criptografadas.");
     setEvo((x) => ({ ...x, apiKey: "" }));
   }
+  async function saveEmailTemplate(){setMessage("Salvando mensagem…");const response=await fetch("/api/settings/integrations",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({provider:"gmail",subjectTemplate,messageTemplate,groupSubjectTemplate,groupMessageTemplate})}),body=await response.json();setMessage(response.ok?"Mensagens padrão salvas com sucesso.":body.error||"Falha ao salvar mensagem.")}
+  async function testGmail(){setTesting(true);setMessage("Testando autenticação do Gmail…");const response=await fetch("/api/integrations/gmail/test",{method:"POST"}),body=await response.json();setTesting(false);setMessage(response.ok?`Gmail validado com sucesso: ${body.email}`:body.error||"Falha ao validar Gmail.")}
   return (
     <>
       <Title
@@ -1381,7 +1398,7 @@ function Settings({ officeId }: { officeId: string }) {
             Extração e análise de documentos
           </p>
         </section>
-        <section className="card settings">
+        {false&&<section className="card settings">
           <h3>WhatsApp — Evolution API</h3>
           <p>
             {configured.includes("evolution") ? (
@@ -1420,7 +1437,15 @@ function Settings({ officeId }: { officeId: string }) {
           <Button onClick={() => void saveEvolution()}>
             Salvar Evolution API
           </Button>
-        </section>
+          {configured.includes("gmail")&&<Button secondary disabled={testing} onClick={()=>void testGmail()}>{testing?<I.LoaderCircle className="spin"/>:<I.CircleCheck/>}Testar conexão Gmail</Button>}
+          <label>Assunto padrão<input value={subjectTemplate} onChange={event=>setSubjectTemplate(event.target.value)}/></label>
+          <label>Mensagem padrão<textarea rows={8} value={messageTemplate} onChange={event=>setMessageTemplate(event.target.value)}/></label>
+          <small>Variáveis: {"{{cliente}}"}, {"{{tipo}}"}, {"{{competencia}}"}, {"{{vencimento}}"}, {"{{valor}}"} e {"{{arquivo}}"}.</small>
+          <label>Assunto para várias guias<input value={groupSubjectTemplate} onChange={event=>setGroupSubjectTemplate(event.target.value)}/></label>
+          <label>Mensagem para várias guias<textarea rows={8} value={groupMessageTemplate} onChange={event=>setGroupMessageTemplate(event.target.value)}/></label>
+          <small>Para lotes, use também {"{{quantidade}}"}, {"{{tipos}}"} e {"{{competencias}}"}.</small>
+          <Button disabled={!configured.includes("gmail")} onClick={()=>void saveEmailTemplate()}><I.Save/>Salvar mensagem padrão</Button>
+        </section>}
         <section className="card settings">
           <h3>E-mail — Gmail API</h3>
           <p>
@@ -1459,6 +1484,11 @@ function Settings({ officeId }: { officeId: string }) {
               ? "Reconectar conta Google"
               : "Conectar conta Google"}
           </Button>
+          {configured.includes("gmail")&&<Button secondary disabled={testing} onClick={()=>void testGmail()}>{testing?<I.LoaderCircle className="spin"/>:<I.CircleCheck/>}Testar conexão Gmail</Button>}
+          <label>Assunto padrão<input value={subjectTemplate} onChange={event=>setSubjectTemplate(event.target.value)}/></label>
+          <label>Mensagem padrão<textarea rows={8} value={messageTemplate} onChange={event=>setMessageTemplate(event.target.value)}/></label>
+          <small>Variáveis: {"{{cliente}}"}, {"{{tipo}}"}, {"{{competencia}}"}, {"{{vencimento}}"}, {"{{valor}}"} e {"{{arquivo}}"}.</small>
+          <Button disabled={!configured.includes("gmail")} onClick={()=>void saveEmailTemplate()}><I.Save/>Salvar mensagem padrão</Button>
           {!gmailReady && (
             <small>
               Configure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e APP_URL no

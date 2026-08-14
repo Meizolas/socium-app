@@ -20,7 +20,7 @@ export async function POST(_:Request,{params}:{params:Promise<{id:string}>}){
     let clientId=client.data?.id;
     if(!clientId){
       const legalName=document.data.extracted_legal_name||nameFromFile(document.data.final_name||document.data.original_name);
-      const created=await db.from('clients').insert({office_id:officeId,legal_name:legalName,trade_name:document.data.extracted_short_name||null,cnpj,email:null,whatsapp:null,preference:'Envio manual',active:false,auto_created:true,notes:'Cadastro provisório criado automaticamente a partir de uma guia. Complete os contatos antes do envio.'}).select('id').single();
+      const created=await db.from('clients').insert({office_id:officeId,legal_name:legalName,trade_name:document.data.extracted_short_name||null,cnpj,email:null,whatsapp:null,preference:'Somente e-mail',active:false,auto_created:true,notes:'Cadastro provisório criado automaticamente a partir de uma guia. Complete os contatos antes do envio.'}).select('id').single();
       if(created.error)throw new Error(created.error.message);
       clientId=created.data.id;
     }
