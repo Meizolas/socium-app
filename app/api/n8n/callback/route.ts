@@ -49,13 +49,13 @@ export async function POST(req:Request){
     }
 
     const failed=Boolean(p.errorMessage);
-    const status=failed?'Erro':p.currentStep&&p.currentStep<4?'Processando':'Pronto para envio';
+    const status=failed?'Erro no processamento':p.currentStep&&p.currentStep<4?'Extraindo dados da guia':'Dados extraídos — identificando cliente';
     const processing=await db.from('processings').update({
       current_step:Number(p.currentStep)||1,
       status,
-      progress:failed?0:Math.min(100,Number(p.progress)||100),
+      progress:failed?100:p.currentStep&&p.currentStep<4?Math.max(35,Math.min(65,Number(p.progress)||50)):70,
       error_message:p.errorMessage||null,
-      finished_at:failed||status==='Pronto para envio'?new Date().toISOString():null,
+      finished_at:failed?new Date().toISOString():null,
     }).eq('id',processingId);
     if(processing.error)throw new Error(processing.error.message);
 
@@ -76,13 +76,14 @@ export async function POST(req:Request){
       due_date:dueDate,
       amount:Number.isFinite(amount)?amount:null,
       final_name:finalName||null,
-      status:clientId&&!clientNeedsCompletion?status:'Revisão necessária',
+      status:failed?'Erro':clientId&&!clientNeedsCompletion?'Pronto para envio':'Revisão necessária',
     };
     if(/^\d{2}\/\d{4}$/.test(String(p.competence||'')))documentChanges.competence=p.competence;
     const document=await db.from('documents').update(documentChanges).eq('id',documentId);
     if(document.error)throw new Error(document.error.message);
 
     if(clientNeedsCompletion&&cnpj){
+      await db.from('processings').update({status:'Processado — cadastro do cliente incompleto',progress:100,finished_at:new Date().toISOString()}).eq('id',processingId);
       await db.from('alerts').insert({
         office_id:officeId,
         document_id:documentId,
@@ -91,7 +92,7 @@ export async function POST(req:Request){
         title:`${extractedLegalName||'Razão social extraída'} — CNPJ ${cnpj}. Informe e-mail/WhatsApp e escolha a preferência para liberar o envio.`,
       });
     }
-    if(failed||status==='Pronto para envio'){
+    if(!failed&&!(clientNeedsCompletion&&cnpj)&&!(p.currentStep&&p.currentStep<4)){
       const relation=Array.isArray(current.data.documents)?current.data.documents[0]:current.data.documents;
       if(relation?.batch_id)await attemptBatchDelivery(relation.batch_id);
       else if(clientId&&!clientNeedsCompletion)await attemptDocumentDelivery(documentId);
@@ -102,7 +103,7 @@ export async function POST(req:Request){
     if(processingId&&documentId&&officeId){
       const db=supabaseAdmin();
       await Promise.all([
-        db.from('processings').update({status:'Erro',progress:0,error_message:message,finished_at:new Date().toISOString()}).eq('id',processingId),
+        db.from('processings').update({status:'Erro no processamento',progress:100,error_message:message,finished_at:new Date().toISOString()}).eq('id',processingId),
         db.from('documents').update({status:'Erro'}).eq('id',documentId),
         db.from('alerts').insert({office_id:officeId,document_id:documentId,type:'Erro no processamento',severity:'Crítico',title:message.slice(0,300)}),
       ]);

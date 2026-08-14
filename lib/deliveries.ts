@@ -8,12 +8,28 @@ type ChannelResult = {
   error?: string;
 };
 const DEFAULT_SUBJECT = "Guia {{tipo}} — {{competencia}} — {{cliente}}";
-const DEFAULT_MESSAGE =
-  "Olá,\n\nSegue em anexo a guia {{tipo}} referente à competência {{competencia}}, com vencimento em {{vencimento}}.\n\nAtenciosamente,\nSocium Contábil";
+const DEFAULT_MESSAGE = `Prezados,
+
+Segue(m) anexo guia(s) de imposto(s) ref. a empresa **{{cliente}}**.
+
+📅 **Data de vencimento:**
+{{vencimento}}
+
+💰 **Valor:**
+{{valor}}
+
+Pedimos, por gentileza, que o pagamento seja realizado até a data informada para evitar encargos.
+
+Em caso de dúvidas, estamos à disposição.
+
+Atenciosamente,
+
+***Anselmo Júnior***
+***(77) 9 9174-0886 (zap)***
+***(77) 9 9995-4833***`;
 const DEFAULT_GROUP_SUBJECT =
   "Guias {{tipos}} — {{competencias}} — {{cliente}}";
-const DEFAULT_GROUP_MESSAGE =
-  "Olá,\n\nSeguem em anexo {{quantidade}} guias ({{tipos}}), referentes às competências {{competencias}}.\n\nAtenciosamente,\nSocium Contábil";
+const DEFAULT_GROUP_MESSAGE = DEFAULT_MESSAGE;
 
 async function documentData(documentId: string) {
   const db = supabaseAdmin(),
@@ -56,6 +72,32 @@ async function record(
 }
 function replaceVariables(template: string, values: Record<string, string>) {
   return template.replace(/{{\s*(\w+)\s*}}/g, (_, key) => values[key] ?? "");
+}
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+function templateToHtml(value: string) {
+  return escapeHtml(value)
+    .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br>");
+}
+function formatDate(value: string | null | undefined) {
+  if (!value) return "Não informado";
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value);
+}
+function formatMoney(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "")
+    return "Não informado";
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? number.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+    : "Não informado";
 }
 function friendlyGoogleError(body: {
   error?: string;
@@ -175,6 +217,8 @@ export async function sendGmailDocuments(documentIds: string[]) {
     competences = [
       ...new Set(docs.map((doc) => doc.competence).filter(Boolean)),
     ],
+    dueDates = [...new Set(docs.map((doc) => formatDate(doc.due_date)))],
+    amounts = docs.map((doc) => formatMoney(doc.amount)),
     plural = docs.length > 1,
     values = {
       cliente: client.legal_name || "",
@@ -183,8 +227,10 @@ export async function sendGmailDocuments(documentIds: string[]) {
       competencia: competences[0] || "",
       competencias: competences.join(", "),
       quantidade: String(docs.length),
-      vencimento: "",
-      valor: "",
+      vencimento: dueDates.join("\n"),
+      vencimentos: dueDates.join("\n"),
+      valor: amounts.join("\n"),
+      valores: amounts.join("\n"),
       arquivo: attachments.map((item) => item.fileName).join(", "),
     },
     subject = replaceVariables(
@@ -208,10 +254,10 @@ export async function sendGmailDocuments(documentIds: string[]) {
       `Content-Type: multipart/mixed; boundary="${boundary}"`,
       "",
       `--${boundary}`,
-      'Content-Type: text/plain; charset="UTF-8"',
+      'Content-Type: text/html; charset="UTF-8"',
       "Content-Transfer-Encoding: base64",
       "",
-      Buffer.from(message).toString("base64"),
+      Buffer.from(templateToHtml(message)).toString("base64"),
       "",
     ];
   for (const attachment of attachments)
@@ -293,6 +339,10 @@ export async function attemptBatchDelivery(batchId: string) {
     );
     if (!pendingIds.length) continue;
     await db
+      .from("processings")
+      .update({ status: "Processado — enviando por e-mail", progress: 90 })
+      .in("document_id", pendingIds);
+    await db
       .from("documents")
       .update({ status: "Enviando" })
       .in("id", pendingIds);
@@ -302,6 +352,10 @@ export async function attemptBatchDelivery(batchId: string) {
         .from("documents")
         .update({ status: "Enviado" })
         .in("id", pendingIds);
+      await db
+        .from("processings")
+        .update({ status: "Concluído — enviado por e-mail", progress: 100, finished_at: new Date().toISOString(), error_message: null })
+        .in("document_id", pendingIds);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Falha no envio do lote.";
@@ -317,6 +371,10 @@ export async function attemptBatchDelivery(batchId: string) {
         .from("documents")
         .update({ status: "Erro" })
         .in("id", pendingIds);
+      await db
+        .from("processings")
+        .update({ status: "Processado — erro no envio do e-mail", progress: 100, finished_at: new Date().toISOString(), error_message: message.slice(0, 500) })
+        .in("document_id", pendingIds);
       const first = await db
         .from("documents")
         .select("office_id")
@@ -371,6 +429,10 @@ export async function attemptDocumentDelivery(documentId: string) {
   if (/e-mail|email/i.test(preference)) channels.push("email");
   if (/whatsapp/i.test(preference)) channels.push("whatsapp");
   if (!channels.length) channels.push("email");
+  await db
+    .from("processings")
+    .update({ status: "Processado — enviando por e-mail", progress: 90, error_message: null })
+    .eq("document_id", documentId);
   await db
     .from("documents")
     .update({ status: "Enviando" })
@@ -439,6 +501,22 @@ export async function attemptDocumentDelivery(documentId: string) {
         title: errors.join(" | ").slice(0, 300),
       });
   }
+  const sentChannels = results
+    .filter((result) => result.status !== "error")
+    .map((result) => (result.channel === "email" ? "e-mail" : "WhatsApp"));
+  await db
+    .from("processings")
+    .update({
+      status: errors.length
+        ? successful
+          ? "Concluído parcialmente — um canal falhou"
+          : "Processado — erro no envio"
+        : `Concluído — enviado por ${sentChannels.join(" + ")}`,
+      progress: 100,
+      error_message: errors.length ? errors.join(" | ").slice(0, 500) : null,
+      finished_at: new Date().toISOString(),
+    })
+    .eq("document_id", documentId);
   return {
     status: status.toLowerCase(),
     message: errors.length

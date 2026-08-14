@@ -16,19 +16,19 @@ export async function POST(_:Request,{params}:{params:Promise<{id:string}>}){
     if(!process.env.N8N_WEBHOOK_URL)throw new Error('N8N_WEBHOOK_URL não configurada.');
     const attempts=await db.from('attempts').select('id',{count:'exact',head:true}).eq('processing_id',processing.data.id);
     const attempt=(attempts.count||0)+1;
-    await db.from('processings').update({status:'Aguardando n8n',progress:10,error_message:null,started_at:new Date().toISOString(),finished_at:null}).eq('id',processing.data.id);
+    await db.from('processings').update({status:'Arquivo enviado ao n8n — extraindo dados',progress:20,error_message:null,started_at:new Date().toISOString(),finished_at:null}).eq('id',processing.data.id);
     await db.from('documents').update({status:'Processando'}).eq('id',id);
     const response=await fetch(process.env.N8N_WEBHOOK_URL,{method:'POST',headers:{'Content-Type':'application/json','x-webhook-secret':process.env.N8N_WEBHOOK_SECRET||''},body:JSON.stringify({documentId:id,processingId:processing.data.id,originalName:document.data.original_name,fileUrl:signed.data.signedUrl,officeId,competence:document.data.competence})});
     const body=(await response.text()).slice(0,2000);
     await db.from('attempts').insert({office_id:officeId,processing_id:processing.data.id,attempt,request:{documentId:id,originalName:document.data.original_name,competence:document.data.competence},response:{status:response.status,body}});
-    if(!response.ok){await db.from('processings').update({status:'Erro',progress:0,error_message:`n8n respondeu ${response.status}: ${body.slice(0,300)}`}).eq('id',processing.data.id);await db.from('documents').update({status:'Erro'}).eq('id',id);return Response.json({error:`n8n respondeu ${response.status}`,details:body},{status:502})}
+    if(!response.ok){await db.from('processings').update({status:'Erro ao iniciar no n8n',progress:100,error_message:`n8n respondeu ${response.status}: ${body.slice(0,300)}`,finished_at:new Date().toISOString()}).eq('id',processing.data.id);await db.from('documents').update({status:'Erro'}).eq('id',id);return Response.json({error:`n8n respondeu ${response.status}`,details:body},{status:502})}
     return Response.json({ok:true,status:response.status,response:body});
   }catch(error){
     const message=error instanceof Error?error.message:'Falha ao reprocessar.';
     if(documentId&&processingId&&officeId){
       const db=supabaseAdmin();
       await Promise.all([
-        db.from('processings').update({status:'Erro',progress:0,error_message:message,finished_at:new Date().toISOString()}).eq('id',processingId),
+        db.from('processings').update({status:'Erro ao reprocessar',progress:100,error_message:message,finished_at:new Date().toISOString()}).eq('id',processingId),
         db.from('documents').update({status:'Erro'}).eq('id',documentId),
         db.from('alerts').insert({office_id:officeId,document_id:documentId,type:'Erro no reprocessamento',severity:'Crítico',title:message.slice(0,300)}),
       ]);

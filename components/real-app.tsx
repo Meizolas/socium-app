@@ -55,6 +55,18 @@ type Alert = {
   cnpj?: string;
   legal_name?: string;
 };
+type Shipment = {
+  id: string;
+  documentId: string;
+  file: string;
+  type: string;
+  client: string;
+  channel: string;
+  status: string;
+  sentAt?: string;
+  errorMessage?: string;
+  competence?: string;
+};
 const formatDateTime = (value: string) =>
   new Intl.DateTimeFormat("pt-BR", {
     timeZone: "America/Sao_Paulo",
@@ -71,8 +83,9 @@ type Data = {
   clients: Client[];
   jobs: Job[];
   alerts: Alert[];
+  shipments: Shipment[];
 };
-const empty: Data = { officeId: "", clients: [], jobs: [], alerts: [] };
+const empty: Data = { officeId: "", clients: [], jobs: [], alerts: [], shipments: [] };
 const nav: [Page, React.ElementType][] = [
   ["Visão geral", I.House],
   ["Importar Guias", I.CloudUpload],
@@ -111,7 +124,7 @@ function Badge({ status }: { status: string }) {
       ? "red"
       : /Revisão|Atenção|Incompleto|não cadastrado/i.test(status)
         ? "yellow"
-        : /Processando|fila/.test(status)
+        : /Process|fila|extraindo|enviando|n8n/i.test(status)
           ? "blue"
           : "gray";
   return <span className={"badge " + color}>{status}</span>;
@@ -264,10 +277,7 @@ export function RealApp() {
             />
           )}
           {!error && !loading && page === "Envios" && (
-            <Empty
-              title="Envios"
-              text="Nenhum envio registrado no banco para esta competência."
-            />
+            <Shipments items={data.shipments.filter(item=>!period||item.competence===period)} />
           )}
           {!error && !loading && page === "Configurações" && (
             <Settings officeId={data.officeId} />
@@ -854,9 +864,7 @@ function Processings({
       }),
       body = await response.json();
     setSending("");
-    window.alert(
-      response.ok ? body.message : body.error || "Não foi possível enviar.",
-    );
+    if(!response.ok)console.error(body.error||"Não foi possível enviar.");
     await refresh();
   }
   async function retry(job: Job) {
@@ -866,11 +874,7 @@ function Processings({
       }),
       body = await response.json();
     setRetrying("");
-    window.alert(
-      response.ok
-        ? "Documento reenviado para processamento."
-        : body.error || "Não foi possível reprocessar.",
-    );
+    if(!response.ok)console.error(body.error||"Não foi possível reprocessar.");
     await refresh();
   }
   async function remove(job: Job) {
@@ -1270,6 +1274,18 @@ function ClientModal({
     </div>
   );
 }
+function Shipments({items}:{items:Shipment[]}){
+  return <>
+    <Title title="Envios" sub="Histórico real das tentativas de envio por competência." />
+    <section className="card queue">
+      <div className="tablehead"><h3>Histórico de envios</h3><Badge status={`${items.length} registro(s)`}/></div>
+      {items.length?<div className="tablewrap"><table><thead><tr><th>Arquivo</th><th>Tipo</th><th>Cliente</th><th>Canal</th><th>Status</th><th>Enviado/atualizado</th></tr></thead><tbody>
+      {items.map(item=><tr key={item.id}><td><b>{item.file}</b></td><td><Badge status={item.type}/></td><td>{item.client}</td><td>{item.channel==='email'?'E-mail':'WhatsApp'}</td><td><Badge status={item.status}/>{item.errorMessage&&<small>{item.errorMessage}</small>}</td><td>{item.sentAt?formatDateTime(item.sentAt):"—"}</td></tr>)}
+      </tbody></table></div>:<EmptyLine text="Nenhum envio registrado no banco para esta competência."/>}
+    </section>
+  </>
+}
+
 function Alerts({
   items,
   onRegister,
@@ -1319,9 +1335,9 @@ function Settings({ officeId }: { officeId: string }) {
     [gmailEmail, setGmailEmail] = useState(""),
     [gmailRedirect, setGmailRedirect] = useState(""),
     [subjectTemplate,setSubjectTemplate]=useState("Guia {{tipo}} — {{competencia}} — {{cliente}}"),
-    [messageTemplate,setMessageTemplate]=useState("Olá,\n\nSegue em anexo a guia {{tipo}} referente à competência {{competencia}}, com vencimento em {{vencimento}}.\n\nAtenciosamente,\nSocium Contábil"),
+    [messageTemplate,setMessageTemplate]=useState("Prezados,\n\nSegue(m) anexo guia(s) de imposto(s) ref. a empresa **{{cliente}}**.\n\n📅 **Data de vencimento:**\n{{vencimento}}\n\n💰 **Valor:**\n{{valor}}\n\nPedimos, por gentileza, que o pagamento seja realizado até a data informada para evitar encargos.\n\nEm caso de dúvidas, estamos à disposição.\n\nAtenciosamente,\n\n***Anselmo Júnior***\n***(77) 9 9174-0886 (zap)***\n***(77) 9 9995-4833***"),
     [groupSubjectTemplate,setGroupSubjectTemplate]=useState("Guias {{tipos}} — {{competencias}} — {{cliente}}"),
-    [groupMessageTemplate,setGroupMessageTemplate]=useState("Olá,\n\nSeguem em anexo {{quantidade}} guias ({{tipos}}), referentes às competências {{competencias}}.\n\nAtenciosamente,\nSocium Contábil"),
+    [groupMessageTemplate,setGroupMessageTemplate]=useState("Prezados,\n\nSegue(m) anexo guia(s) de imposto(s) ref. a empresa **{{cliente}}**.\n\n📅 **Data de vencimento:**\n{{vencimento}}\n\n💰 **Valor:**\n{{valor}}\n\nPedimos, por gentileza, que o pagamento seja realizado até a data informada para evitar encargos.\n\nEm caso de dúvidas, estamos à disposição.\n\nAtenciosamente,\n\n***Anselmo Júnior***\n***(77) 9 9174-0886 (zap)***\n***(77) 9 9995-4833***"),
     [testing,setTesting]=useState(false),
     [message, setMessage] = useState("");
   useEffect(() => {
