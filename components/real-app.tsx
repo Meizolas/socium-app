@@ -750,15 +750,16 @@ function ImportPage({
   const [files, setFiles] = useState<File[]>([]),
     [busy, setBusy] = useState(false),
     [uploads,setUploads]=useState<Record<string,{progress:number,status:string,error?:string}>>({}),
-    [messages, setMessages] = useState<string[]>([]);
+    [messages, setMessages] = useState<{text:string;kind:"success"|"duplicate"|"error"}[]>([]);
   const input = useRef<HTMLInputElement>(null);
   const validPeriod=/^(0[1-9]|1[0-2])\/\d{4}$/.test(period);
   async function process() {
-    if(!validPeriod){setMessages(["Selecione uma competência no topo da página antes de iniciar o processamento."]);return}
+    if(!validPeriod){setMessages([{text:"Selecione uma competência no topo da página antes de iniciar o processamento.",kind:"error"}]);return}
     setBusy(true);
     const batchId=crypto.randomUUID();
     const uploadedIds:string[]=[];
-    const output: string[] = [];
+    const output: {text:string;kind:"success"|"duplicate"|"error"}[] = [];
+    let duplicateCount=0;
     for (const file of files) {
       const form = new FormData();
       form.append("file", file);
@@ -768,16 +769,19 @@ function ImportPage({
       form.append("documentCategory",kind);
       try {
         setUploads(current=>({...current,[file.name]:{progress:0,status:"Preparando upload"}}));
-        const body=await new Promise<{id?:string}>((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open("POST","/api/documents");xhr.upload.onprogress=event=>{if(event.lengthComputable){const progress=Math.round(event.loaded/event.total*100);setUploads(current=>({...current,[file.name]:{progress,status:progress<100?"Enviando arquivo":"Armazenando no Supabase"}}))}};xhr.onload=()=>{let result;try{result=JSON.parse(xhr.responseText)}catch{result={error:"Resposta inválida do servidor."}}if(xhr.status>=200&&xhr.status<300)resolve(result);else reject(new Error(result.error||`Erro HTTP ${xhr.status}`))};xhr.onerror=()=>reject(new Error("Falha de conexão com o servidor."));xhr.send(form)});
+        const body=await new Promise<{id?:string}>((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open("POST","/api/documents");xhr.upload.onprogress=event=>{if(event.lengthComputable){const progress=Math.round(event.loaded/event.total*100);setUploads(current=>({...current,[file.name]:{progress,status:progress<100?"Enviando arquivo":"Armazenando no Supabase"}}))}};xhr.onload=()=>{let result;try{result=JSON.parse(xhr.responseText)}catch{result={error:"Resposta inválida do servidor."}}if(xhr.status>=200&&xhr.status<300)resolve(result);else{const failure=new Error(result.error||`Erro HTTP ${xhr.status}`) as Error&{status:number};failure.status=xhr.status;reject(failure)}};xhr.onerror=()=>reject(new Error("Falha de conexão com o servidor."));xhr.send(form)});
         setUploads(current=>({...current,[file.name]:{progress:100,status:"Aguardando processamento do n8n"}}));
         if(body.id)uploadedIds.push(body.id);
-        output.push(`${file.name}: recebido e enviado ao n8n${body.id?` (documento ${body.id})`:""}`);
+        output.push({text:`${file.name}: recebido e enviado ao n8n${body.id?` (documento ${body.id})`:""}`,kind:"success"});
       } catch(error) {
-        const detail=error instanceof Error?error.message:"Falha desconhecida";
-        setUploads(current=>({...current,[file.name]:{progress:0,status:"Erro",error:detail}}));
-        output.push(`${file.name}: ${detail}`);
+        const failure=error as Error&{status?:number},duplicate=failure.status===409;
+        const detail=duplicate?"Este PDF já foi importado anteriormente. Use Reprocessar na tela de Processamentos ou exclua o registro anterior antes de importar novamente.":failure instanceof Error?failure.message:"Falha desconhecida";
+        if(duplicate)duplicateCount++;
+        setUploads(current=>({...current,[file.name]:{progress:0,status:duplicate?"Arquivo já importado":"Erro",error:detail}}));
+        output.push({text:`${file.name}: ${detail}`,kind:duplicate?"duplicate":"error"});
       }
     }
+    if(duplicateCount)output.unshift({text:`${duplicateCount} arquivo(s) não foram enviados porque já haviam sido importados. Nenhum deles foi encaminhado novamente ao n8n.`,kind:"duplicate"});
     setMessages(output);
     if(uploadedIds.length)await fetch("/api/documents/batch/finalize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({batchId,documentIds:uploadedIds})});
     setBusy(false);
@@ -836,9 +840,9 @@ function ImportPage({
           </Button>
         </div></>
       )}
-      {messages.map((m) => (
-        <div className="resultline" key={m}>
-          {m}
+      {messages.map((message,index) => (
+        <div className={`resultline ${message.kind}`} key={`${message.text}-${index}`}>
+          {message.kind==="duplicate"?<I.TriangleAlert size={18}/>:message.kind==="error"?<I.CircleX size={18}/>:<I.CircleCheck size={18}/>} {message.text}
         </div>
       ))}
     </>

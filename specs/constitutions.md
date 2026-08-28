@@ -168,6 +168,8 @@ O script de referência espera `item.json.text` e produz:
 - `finalName` sanitizado, normalmente `TIPO - NOME CURTO - MÊS-ANO.pdf`;
 - `currentStep: 4`, `progress: 100` e eventual `errorMessage`.
 
+Para DARFs SENDA em que o PDF lista todos os rótulos antes dos valores, o extrator usa um parser específico: isola a primeira via, captura identidade/competência no bloco após o CNPJ e lê vencimento e valores no trecho entre `Observações` e `SENDA`. A última quantia desse trecho é tratada como valor total. Isso evita confundir valor principal, multa, data de geração, linha digitável ou a segunda via repetida.
+
 O workflow n8n completo não está versionado: somente o código do nó de extração está no repositório. Download do PDF, parser de texto, encadeamento e chamada do callback precisam ser configurados fora do código.
 
 ### 6.3 Identificação e criação de clientes
@@ -445,3 +447,21 @@ specs/constitutions.md  Este documento
 - Guias e parcelamentos continuam recebendo a competência selecionada como parâmetro de processamento.
 - Mantida a validação que impede upload caso a competência operacional seja apagada ou fique inválida.
 - Arquivos alterados: `components/real-app.tsx` e este documento.
+
+### 28/08/2026 — extração de DARF SENDA com campos separados
+
+- Corrigida a leitura de DARFs em que rótulos e valores ficam em blocos separados no texto do PDF.
+- O extrator agora identifica CNPJ, razão social, competência, vencimento e valor total nesse layout, usando somente a primeira das vias repetidas.
+- Adicionado teste de regressão com o DARF fornecido, incluindo duas vias, em `n8n/extract-guide.test.js`.
+- Adicionado o comando `npm run test:n8n`.
+- Resultado esperado validado: `BRITTO E PENA LTDA`, competência `06/2026`, vencimento `2026-08-31` e valor `1546.83`.
+- Arquivos alterados: `n8n/extract-guide.js`, `n8n/extract-guide.test.js`, `package.json` e este documento.
+
+### 28/08/2026 — feedback explícito para arquivos duplicados
+
+- Respostas HTTP `409` durante a importação agora são identificadas como duplicidade, e não como erro genérico.
+- O PDF permanece visível na lista com o status **Arquivo já importado** e orientação para reprocessar ou excluir o registro anterior.
+- Ao final do lote, um resumo destacado informa quantos arquivos foram ignorados e esclarece que eles não foram reenviados ao n8n.
+- Resultados de sucesso, duplicidade e erro receberam estilos visuais distintos.
+- A melhoria vale para Importar Guias e Importar Parcelamentos.
+- Arquivos alterados: `components/real-app.tsx`, `app/real.css` e este documento.

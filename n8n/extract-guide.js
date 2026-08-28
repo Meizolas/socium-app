@@ -21,6 +21,33 @@ const cleanLine = (value) => String(value || "").replace(/\s+/g, " ").trim();
 const onlyCnpj = (value) => String(value || "").replace(/\D/g, "");
 const validCnpjText = String.raw`\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}|\d{14}`;
 
+// DARFs gerados pelo SENDA frequentemente trazem todos os rótulos primeiro e,
+// só depois de "Observações", os respectivos valores. Também costumam conter
+// duas vias idênticas no mesmo PDF. Este parser isola a primeira via e trata
+// esse layout sem depender da proximidade entre rótulo e valor.
+function separatedDarfFields(text) {
+  const copies = text.split(/\n(?=MINIST[ÉE]RIO\s+DA\s+FAZENDA)/i);
+  const copy = copies[0] || text;
+  const identity = copy.match(
+    new RegExp(`(${validCnpjText})\\s*\\n\\s*(\\d{2})[/.](\\d{2})[/.](\\d{4})\\s*\\n\\s*(?:1\\s*[ªa]\\.?\\s*via\\s*\\n\\s*)?([^\\n]+)`, "i"),
+  );
+  const valuesBlock = copy.match(
+    /Observa[çc][õo]es\s*:\s*\n([\s\S]*?)(?=\nSENDA\b)/i,
+  )?.[1] || "";
+  const due = valuesBlock.match(/\b(\d{2})[/.](\d{2})[/.](\d{4})\b/);
+  const moneyValues = [...valuesBlock.matchAll(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g)]
+    .map((match) => Number(match[0].replace(/\./g, "").replace(",", ".")))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return {
+    cnpj: onlyCnpj(identity?.[1]),
+    competence: identity ? `${identity[3]}/${identity[4]}` : "",
+    legalName: cleanLine(identity?.[5]),
+    dueDate: due ? `${due[3]}-${due[2]}-${due[1]}` : null,
+    // No layout SENDA, a última quantia antes da identificação do sistema é o total.
+    amount: moneyValues.length ? moneyValues[moneyValues.length - 1] : null,
+  };
+}
+
 function identifyType(upper) {
   if (upper.includes("DOCUMENTO DE ARRECADACAO DO SIMPLES NACIONAL")) return "DAS";
   if (
@@ -47,6 +74,13 @@ function identifyType(upper) {
 
 function contributor(text, type) {
   let match;
+
+  if (type === "DARF") {
+    const fields = separatedDarfFields(text);
+    if (fields.cnpj || fields.legalName) {
+      return { cnpj: fields.cnpj, legalName: fields.legalName };
+    }
+  }
 
   // DAM: evita usar o CNPJ da prefeitura e captura o contribuinte.
   if (type === "DAM") {
@@ -104,7 +138,11 @@ function normalizeCompetence(month, year) {
   return number && /^\d{4}$/.test(year) ? `${number}/${year}` : "";
 }
 
-function findCompetence(text) {
+function findCompetence(text, type) {
+  if (type === "DARF") {
+    const value = separatedDarfFields(text).competence;
+    if (value) return value;
+  }
   const patterns = [
     /(?:REFER[ÊE]NCIA|M[ÊE]S\s*\/\s*ANO|PA)\s*[:\n]?\s*(\d{1,2})[/-](\d{4})/i,
     /(?:Per[ií]odo(?:\s+de\s+Apura[çc][ãa]o)?|Apura[çc][ãa]o)\s*[:\n]?\s*(\d{1,2})\/(\d{4})/i,
@@ -121,7 +159,11 @@ function findCompetence(text) {
   return "";
 }
 
-function findDueDate(text) {
+function findDueDate(text, type) {
+  if (type === "DARF") {
+    const value = separatedDarfFields(text).dueDate;
+    if (value) return value;
+  }
   const patterns = [
     /DATA\s+DE\s+VENCIMENTO\s*\n?\s*(\d{2})[/.](\d{2})[/.](\d{4})/i,
     /(?:Pagar\s+(?:este\s+documento\s+)?at[ée]|Pagar\s+at[ée]|Pag[áa]vel\s+at[ée])\s*[:\n]?\s*(\d{2})[/.](\d{2})[/.](\d{4})/i,
@@ -135,7 +177,11 @@ function findDueDate(text) {
   return null;
 }
 
-function findAmount(text) {
+function findAmount(text, type) {
+  if (type === "DARF") {
+    const value = separatedDarfFields(text).amount;
+    if (value) return value;
+  }
   const patterns = [
     /Valor\s+Total\s+do\s+Documento\s*[:\n]?\s*(?:R\$\s*)?([\d.,]+)/i,
     /TOTAL\s+A\s+RECOLHER\s*[:\n]?\s*(?:R\$\s*)?([\d.,]+)/i,
@@ -158,9 +204,9 @@ for (const item of $input.all()) {
   const type = identifyType(plain(text));
   const { cnpj, legalName } = contributor(text, type);
   const shortName = shortLegalName(legalName);
-  const competence = findCompetence(text);
-  const dueDate = findDueDate(text);
-  const amount = findAmount(text);
+  const competence = findCompetence(text, type);
+  const dueDate = findDueDate(text, type);
+  const amount = findAmount(text, type);
 
   const [competenceMonth, competenceYear] = competence.split("/");
   const dueParts = dueDate ? dueDate.split("-") : [];
