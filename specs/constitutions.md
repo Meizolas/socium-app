@@ -122,7 +122,7 @@ O Dockerfile faz instalação limpa (`npm ci`), build em estágio separado e exe
 
 `app/page.tsx` sempre renderiza `RealApp`. `components/app.tsx` é uma demonstração/protótipo legado e não é selecionado por `NEXT_PUBLIC_DEMO_MODE`.
 
-`RealApp` é um único Client Component grande. Mantém página ativa, competência, dados, estado de carregamento, alertas e seleção de cliente. Consulta `GET /api/dashboard` ao montar e novamente a cada **2 segundos**. O filtro de competência começa em **Todos** (valor interno vazio); preferências de usuário existentes no banco ainda não são usadas. As telas de importação exigem que uma competência válida `MM/AAAA` seja escolhida antes do upload.
+`RealApp` é um único Client Component grande. Mantém página ativa, competência operacional, dados, estado de carregamento, alertas e seleção de cliente. Consulta `GET /api/dashboard` ao montar e novamente a cada **2 segundos**. A competência operacional começa em `07/2026`, permanece disponível fora da Visão Geral e é usada pelas importações e filtros mensais das demais telas. A Visão Geral ignora essa competência e sempre usa todos os documentos. Preferências de usuário existentes no banco ainda não são usadas.
 
 ### 5.1 Páginas
 
@@ -437,10 +437,11 @@ specs/constitutions.md  Este documento
 - Arquivos principais alterados: `components/real-app.tsx`, `app/api/documents/route.ts`, `app/api/documents/[id]/retry/route.ts`, `app/api/n8n/callback/route.ts`, `app/api/settings/integrations/route.ts`, `lib/deliveries.ts` e este documento.
 - Validação: `npm run build` concluído com sucesso. `npm run lint` continua falhando por 6 erros e 7 avisos preexistentes, concentrados no protótipo legado e em regras novas do React/ESLint sobre efeitos; não foram introduzidos erros de compilação pela feature.
 
-### 28/08/2026 — atividades recentes sem filtro mensal padrão
+### 28/08/2026 — atividades recentes sem filtro mensal na Visão Geral
 
-- O filtro global de competência agora inicia em **Todos**.
-- A Visão Geral passa a mostrar, por padrão, as 10 importações mais recentes de qualquer competência, reunindo guias e parcelamentos.
-- O filtro por mês continua disponível no cabeçalho.
-- As telas de importação bloqueiam o envio enquanto não houver uma competência válida selecionada.
+- A Visão Geral mostra as 10 importações mais recentes de qualquer competência, reunindo guias e parcelamentos.
+- O seletor mensal foi ocultado somente na Visão Geral, pois não afeta os dados exibidos nessa página.
+- A competência operacional continua independente, com padrão `07/2026`, e permanece disponível nas telas que precisam dela.
+- Guias e parcelamentos continuam recebendo a competência selecionada como parâmetro de processamento.
+- Mantida a validação que impede upload caso a competência operacional seja apagada ou fique inválida.
 - Arquivos alterados: `components/real-app.tsx` e este documento.

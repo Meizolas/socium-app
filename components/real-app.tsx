@@ -139,7 +139,7 @@ export function RealApp() {
       null,
     ),
     [collapsed, setCollapsed] = useState(false),
-    [period, setPeriod] = useState(""),
+    [period, setPeriod] = useState("07/2026"),
     [data, setData] = useState<Data>(empty),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
@@ -243,7 +243,7 @@ export function RealApp() {
             </div>
           )}
           {!error && !loading && page === "Visão geral" && (
-            <Overview data={data} jobs={filteredJobs} go={setPage} />
+            <Overview data={data} jobs={data.jobs} go={setPage} />
           )}
           {!error && !loading && page === "Importar Guias" && (
             <ImportPage period={period} refresh={load} kind="GUIA" />
@@ -318,7 +318,7 @@ function Header({
         <b>{page}</b>
       </div>
       <div className="headright">
-        <div className="headmenu">
+        {page !== "Visão geral" && <div className="headmenu">
           <button
             className="month"
             onClick={() => setOpen(open === "date" ? "" : "date")}
@@ -328,28 +328,28 @@ function Header({
               aria-label="Competência"
               value={period}
               onChange={(e) => setPeriod(e.target.value)}
-              placeholder="Todos"
+              placeholder="MM/AAAA"
               onClick={(e) => e.stopPropagation()}
             />
             <I.ChevronDown size={16} />
           </button>
           {open === "date" && (
             <div className="dropdown periodmenu">
-              {["", "07/2026", "06/2026", "05/2026", "04/2026"].map((p) => (
+              {["07/2026", "06/2026", "05/2026", "04/2026"].map((p) => (
                 <button
                   className={period === p ? "selected" : ""}
-                  key={p || "all"}
+                  key={p}
                   onClick={() => {
                     setPeriod(p);
                     setOpen("");
                   }}
                 >
-                  {p || "Todos"}
+                  {p}
                 </button>
               ))}
             </div>
           )}
-        </div>
+        </div>}
         <div className="headmenu">
           <button
             className="iconbtn"
