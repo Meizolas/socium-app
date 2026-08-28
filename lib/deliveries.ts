@@ -30,6 +30,30 @@ Atenciosamente,
 const DEFAULT_GROUP_SUBJECT =
   "Guias {{tipos}} — {{competencias}} — {{cliente}}";
 const DEFAULT_GROUP_MESSAGE = DEFAULT_MESSAGE;
+const DEFAULT_INSTALLMENT_SUBJECT =
+  "PARCELAMENTO {{competencia_hifen}} - {{cliente_curto}}";
+const DEFAULT_INSTALLMENT_MESSAGE = `Prezados,
+
+Segue anexa a guia de imposto referente ao parcelamento.
+
+📅 Data de vencimento:
+{{vencimento}}.
+
+--
+Atenciosamente,
+Equipe Socium Contábil.`;
+const DEFAULT_INSTALLMENT_GROUP_SUBJECT =
+  "PARCELAMENTOS {{competencias_hifen}} - {{cliente_curto}}";
+const DEFAULT_INSTALLMENT_GROUP_MESSAGE = `Prezados,
+
+Seguem anexas as guias de impostos referentes aos parcelamentos.
+
+📅 Datas de vencimento:
+{{vencimentos}}.
+
+--
+Atenciosamente,
+Equipe Socium Contábil.`;
 
 async function documentData(documentId: string) {
   const db = supabaseAdmin(),
@@ -174,6 +198,8 @@ export async function sendGmailDocuments(documentIds: string[]) {
     : docs[0].clients;
   if (docs.some((doc) => doc.client_id !== docs[0].client_id))
     throw new Error("O lote contém documentos de clientes diferentes.");
+  if (docs.some((doc) => (doc.document_category || "GUIA") !== (docs[0].document_category || "GUIA")))
+    throw new Error("O lote contém guias e parcelamentos misturados.");
   const recipients = [
     ...new Set(
       [client?.email, ...(client?.additional_emails || [])]
@@ -220,12 +246,16 @@ export async function sendGmailDocuments(documentIds: string[]) {
     dueDates = [...new Set(docs.map((doc) => formatDate(doc.due_date)))],
     amounts = docs.map((doc) => formatMoney(doc.amount)),
     plural = docs.length > 1,
+    isInstallment = (docs[0].document_category || "GUIA") === "PARCELAMENTO",
     values = {
       cliente: client.legal_name || "",
+      cliente_curto: client.trade_name || docs[0].extracted_short_name || client.legal_name || "",
       tipo: types[0] || "GUIA",
       tipos: types.join(", "),
       competencia: competences[0] || "",
       competencias: competences.join(", "),
+      competencia_hifen: String(competences[0] || "").replace("/", "-"),
+      competencias_hifen: competences.map((value) => String(value).replace("/", "-")).join(", "),
       quantidade: String(docs.length),
       vencimento: dueDates.join("\n"),
       vencimentos: dueDates.join("\n"),
@@ -234,15 +264,23 @@ export async function sendGmailDocuments(documentIds: string[]) {
       arquivo: attachments.map((item) => item.fileName).join(", "),
     },
     subject = replaceVariables(
-      plural
-        ? credential.config.groupSubjectTemplate || DEFAULT_GROUP_SUBJECT
-        : credential.config.subjectTemplate || DEFAULT_SUBJECT,
+      isInstallment
+        ? plural
+          ? credential.config.installmentGroupSubjectTemplate || DEFAULT_INSTALLMENT_GROUP_SUBJECT
+          : credential.config.installmentSubjectTemplate || DEFAULT_INSTALLMENT_SUBJECT
+        : plural
+          ? credential.config.groupSubjectTemplate || DEFAULT_GROUP_SUBJECT
+          : credential.config.subjectTemplate || DEFAULT_SUBJECT,
       values,
     ),
     message = replaceVariables(
-      plural
-        ? credential.config.groupMessageTemplate || DEFAULT_GROUP_MESSAGE
-        : credential.config.messageTemplate || DEFAULT_MESSAGE,
+      isInstallment
+        ? plural
+          ? credential.config.installmentGroupMessageTemplate || DEFAULT_INSTALLMENT_GROUP_MESSAGE
+          : credential.config.installmentMessageTemplate || DEFAULT_INSTALLMENT_MESSAGE
+        : plural
+          ? credential.config.groupMessageTemplate || DEFAULT_GROUP_MESSAGE
+          : credential.config.messageTemplate || DEFAULT_MESSAGE,
       values,
     ),
     boundary = `socium_${Date.now()}`,

@@ -18,9 +18,9 @@ export async function POST(_:Request,{params}:{params:Promise<{id:string}>}){
     const attempt=(attempts.count||0)+1;
     await db.from('processings').update({status:'Arquivo enviado ao n8n — extraindo dados',progress:20,error_message:null,started_at:new Date().toISOString(),finished_at:null}).eq('id',processing.data.id);
     await db.from('documents').update({status:'Processando'}).eq('id',id);
-    const response=await fetch(process.env.N8N_WEBHOOK_URL,{method:'POST',headers:{'Content-Type':'application/json','x-webhook-secret':process.env.N8N_WEBHOOK_SECRET||''},body:JSON.stringify({documentId:id,processingId:processing.data.id,originalName:document.data.original_name,fileUrl:signed.data.signedUrl,officeId,competence:document.data.competence})});
+    const response=await fetch(process.env.N8N_WEBHOOK_URL,{method:'POST',headers:{'Content-Type':'application/json','x-webhook-secret':process.env.N8N_WEBHOOK_SECRET||''},body:JSON.stringify({documentId:id,processingId:processing.data.id,originalName:document.data.original_name,fileUrl:signed.data.signedUrl,officeId,competence:document.data.competence,documentCategory:document.data.document_category||'GUIA'})});
     const body=(await response.text()).slice(0,2000);
-    await db.from('attempts').insert({office_id:officeId,processing_id:processing.data.id,attempt,request:{documentId:id,originalName:document.data.original_name,competence:document.data.competence},response:{status:response.status,body}});
+    await db.from('attempts').insert({office_id:officeId,processing_id:processing.data.id,attempt,request:{documentId:id,originalName:document.data.original_name,competence:document.data.competence,documentCategory:document.data.document_category||'GUIA'},response:{status:response.status,body}});
     if(!response.ok){await db.from('processings').update({status:'Erro ao iniciar no n8n',progress:100,error_message:`n8n respondeu ${response.status}: ${body.slice(0,300)}`,finished_at:new Date().toISOString()}).eq('id',processing.data.id);await db.from('documents').update({status:'Erro'}).eq('id',id);return Response.json({error:`n8n respondeu ${response.status}`,details:body},{status:502})}
     return Response.json({ok:true,status:response.status,response:body});
   }catch(error){

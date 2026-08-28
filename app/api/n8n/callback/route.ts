@@ -11,7 +11,7 @@ export async function POST(req:Request){
     processingId=String(p.processingId||'').replace(/^=/,'').trim();
     if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(processingId))return Response.json({error:'processingId inválido'},{status:400});
 
-    const current=await db.from('processings').select('document_id,office_id,documents(batch_id)').eq('id',processingId).single();
+    const current=await db.from('processings').select('document_id,office_id,documents(batch_id,document_category)').eq('id',processingId).single();
     if(current.error)throw new Error(current.error.message);
     documentId=current.data.document_id;
     officeId=current.data.office_id;

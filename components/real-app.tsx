@@ -5,6 +5,7 @@ import * as I from "lucide-react";
 type Page =
   | "Visão geral"
   | "Importar Guias"
+  | "Importar Parcelamentos"
   | "Processamentos"
   | "Clientes"
   | "Envios"
@@ -89,6 +90,7 @@ const empty: Data = { officeId: "", clients: [], jobs: [], alerts: [], shipments
 const nav: [Page, React.ElementType][] = [
   ["Visão geral", I.House],
   ["Importar Guias", I.CloudUpload],
+  ["Importar Parcelamentos", I.Files],
   ["Processamentos", I.Clock3],
   ["Clientes", I.Users],
   ["Envios", I.Send],
@@ -244,7 +246,10 @@ export function RealApp() {
             <Overview data={data} jobs={filteredJobs} go={setPage} />
           )}
           {!error && !loading && page === "Importar Guias" && (
-            <ImportPage period={period} refresh={load} />
+            <ImportPage period={period} refresh={load} kind="GUIA" />
+          )}
+          {!error && !loading && page === "Importar Parcelamentos" && (
+            <ImportPage period={period} refresh={load} kind="PARCELAMENTO" />
           )}
           {!error && !loading && page === "Processamentos" && (
             <Processings
@@ -736,9 +741,11 @@ function JobsTable({
 function ImportPage({
   period,
   refresh,
+  kind,
 }: {
   period: string;
   refresh: () => Promise<void>;
+  kind: "GUIA" | "PARCELAMENTO";
 }) {
   const [files, setFiles] = useState<File[]>([]),
     [busy, setBusy] = useState(false),
@@ -756,6 +763,7 @@ function ImportPage({
       form.append("competence", period);
       form.append("batchId",batchId);
       form.append("batchSize",String(files.length));
+      form.append("documentCategory",kind);
       try {
         setUploads(current=>({...current,[file.name]:{progress:0,status:"Preparando upload"}}));
         const body=await new Promise<{id?:string}>((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open("POST","/api/documents");xhr.upload.onprogress=event=>{if(event.lengthComputable){const progress=Math.round(event.loaded/event.total*100);setUploads(current=>({...current,[file.name]:{progress,status:progress<100?"Enviando arquivo":"Armazenando no Supabase"}}))}};xhr.onload=()=>{let result;try{result=JSON.parse(xhr.responseText)}catch{result={error:"Resposta inválida do servidor."}}if(xhr.status>=200&&xhr.status<300)resolve(result);else reject(new Error(result.error||`Erro HTTP ${xhr.status}`))};xhr.onerror=()=>reject(new Error("Falha de conexão com o servidor."));xhr.send(form)});
@@ -776,8 +784,8 @@ function ImportPage({
   return (
     <>
       <Title
-        title="Importar Guias"
-        sub={`Os arquivos serão armazenados no Supabase e processados na competência ${period}.`}
+        title={kind === "PARCELAMENTO" ? "Importar Parcelamentos" : "Importar Guias"}
+        sub={`Os ${kind === "PARCELAMENTO" ? "parcelamentos" : "arquivos"} serão armazenados no Supabase e processados na competência ${period}.`}
       />
       <section
         className="drop"
@@ -1338,6 +1346,10 @@ function Settings({ officeId }: { officeId: string }) {
     [messageTemplate,setMessageTemplate]=useState("Prezados,\n\nSegue(m) anexo guia(s) de imposto(s) ref. a empresa **{{cliente}}**.\n\n📅 **Data de vencimento:**\n{{vencimento}}\n\n💰 **Valor:**\n{{valor}}\n\nPedimos, por gentileza, que o pagamento seja realizado até a data informada para evitar encargos.\n\nEm caso de dúvidas, estamos à disposição.\n\nAtenciosamente,\n\n***Anselmo Júnior***\n***(77) 9 9174-0886 (zap)***\n***(77) 9 9995-4833***"),
     [groupSubjectTemplate,setGroupSubjectTemplate]=useState("Guias {{tipos}} — {{competencias}} — {{cliente}}"),
     [groupMessageTemplate,setGroupMessageTemplate]=useState("Prezados,\n\nSegue(m) anexo guia(s) de imposto(s) ref. a empresa **{{cliente}}**.\n\n📅 **Data de vencimento:**\n{{vencimento}}\n\n💰 **Valor:**\n{{valor}}\n\nPedimos, por gentileza, que o pagamento seja realizado até a data informada para evitar encargos.\n\nEm caso de dúvidas, estamos à disposição.\n\nAtenciosamente,\n\n***Anselmo Júnior***\n***(77) 9 9174-0886 (zap)***\n***(77) 9 9995-4833***"),
+    [installmentSubjectTemplate,setInstallmentSubjectTemplate]=useState("PARCELAMENTO {{competencia_hifen}} - {{cliente_curto}}"),
+    [installmentMessageTemplate,setInstallmentMessageTemplate]=useState("Prezados,\n\nSegue anexa a guia de imposto referente ao parcelamento.\n\n📅 Data de vencimento:\n{{vencimento}}.\n\n--\nAtenciosamente,\nEquipe Socium Contábil."),
+    [installmentGroupSubjectTemplate,setInstallmentGroupSubjectTemplate]=useState("PARCELAMENTOS {{competencias_hifen}} - {{cliente_curto}}"),
+    [installmentGroupMessageTemplate,setInstallmentGroupMessageTemplate]=useState("Prezados,\n\nSeguem anexas as guias de impostos referentes aos parcelamentos.\n\n📅 Datas de vencimento:\n{{vencimentos}}.\n\n--\nAtenciosamente,\nEquipe Socium Contábil."),
     [testing,setTesting]=useState(false),
     [message, setMessage] = useState("");
   useEffect(() => {
@@ -1357,6 +1369,10 @@ function Settings({ officeId }: { officeId: string }) {
         if(gmail?.config?.messageTemplate)setMessageTemplate(gmail.config.messageTemplate);
         if(gmail?.config?.groupSubjectTemplate)setGroupSubjectTemplate(gmail.config.groupSubjectTemplate);
         if(gmail?.config?.groupMessageTemplate)setGroupMessageTemplate(gmail.config.groupMessageTemplate);
+        if(gmail?.config?.installmentSubjectTemplate)setInstallmentSubjectTemplate(gmail.config.installmentSubjectTemplate);
+        if(gmail?.config?.installmentMessageTemplate)setInstallmentMessageTemplate(gmail.config.installmentMessageTemplate);
+        if(gmail?.config?.installmentGroupSubjectTemplate)setInstallmentGroupSubjectTemplate(gmail.config.installmentGroupSubjectTemplate);
+        if(gmail?.config?.installmentGroupMessageTemplate)setInstallmentGroupMessageTemplate(gmail.config.installmentGroupMessageTemplate);
       })
       .catch(() => {});
   }, []);
@@ -1389,7 +1405,7 @@ function Settings({ officeId }: { officeId: string }) {
     setMessage("Credenciais salvas e criptografadas.");
     setEvo((x) => ({ ...x, apiKey: "" }));
   }
-  async function saveEmailTemplate(){setMessage("Salvando mensagem…");const response=await fetch("/api/settings/integrations",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({provider:"gmail",subjectTemplate,messageTemplate,groupSubjectTemplate,groupMessageTemplate})}),body=await response.json();setMessage(response.ok?"Mensagens padrão salvas com sucesso.":body.error||"Falha ao salvar mensagem.")}
+  async function saveEmailTemplate(){setMessage("Salvando mensagens…");const response=await fetch("/api/settings/integrations",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({provider:"gmail",subjectTemplate,messageTemplate,groupSubjectTemplate,groupMessageTemplate,installmentSubjectTemplate,installmentMessageTemplate,installmentGroupSubjectTemplate,installmentGroupMessageTemplate})}),body=await response.json();setMessage(response.ok?"Mensagens de guias e parcelamentos salvas com sucesso.":body.error||"Falha ao salvar mensagens.")}
   async function testGmail(){setTesting(true);setMessage("Testando autenticação do Gmail…");const response=await fetch("/api/integrations/gmail/test",{method:"POST"}),body=await response.json();setTesting(false);setMessage(response.ok?`Gmail validado com sucesso: ${body.email}`:body.error||"Falha ao validar Gmail.")}
   return (
     <>
@@ -1501,10 +1517,19 @@ function Settings({ officeId }: { officeId: string }) {
               : "Conectar conta Google"}
           </Button>
           {configured.includes("gmail")&&<Button secondary disabled={testing} onClick={()=>void testGmail()}>{testing?<I.LoaderCircle className="spin"/>:<I.CircleCheck/>}Testar conexão Gmail</Button>}
-          <label>Assunto padrão<input value={subjectTemplate} onChange={event=>setSubjectTemplate(event.target.value)}/></label>
-          <label>Mensagem padrão<textarea rows={8} value={messageTemplate} onChange={event=>setMessageTemplate(event.target.value)}/></label>
-          <small>Variáveis: {"{{cliente}}"}, {"{{tipo}}"}, {"{{competencia}}"}, {"{{vencimento}}"}, {"{{valor}}"} e {"{{arquivo}}"}.</small>
-          <Button disabled={!configured.includes("gmail")} onClick={()=>void saveEmailTemplate()}><I.Save/>Salvar mensagem padrão</Button>
+          <h3>Mensagens de guias</h3>
+          <label>Assunto — uma guia<input value={subjectTemplate} onChange={event=>setSubjectTemplate(event.target.value)}/></label>
+          <label>Mensagem — uma guia<textarea rows={8} value={messageTemplate} onChange={event=>setMessageTemplate(event.target.value)}/></label>
+          <label>Assunto — várias guias<input value={groupSubjectTemplate} onChange={event=>setGroupSubjectTemplate(event.target.value)}/></label>
+          <label>Mensagem — várias guias<textarea rows={8} value={groupMessageTemplate} onChange={event=>setGroupMessageTemplate(event.target.value)}/></label>
+          <small>Variáveis: {"{{cliente}}"}, {"{{tipo}}"}, {"{{tipos}}"}, {"{{competencia}}"}, {"{{competencias}}"}, {"{{vencimento}}"}, {"{{vencimentos}}"}, {"{{valor}}"}, {"{{quantidade}}"} e {"{{arquivo}}"}.</small>
+          <h3>Mensagens de parcelamentos</h3>
+          <label>Assunto — um parcelamento<input value={installmentSubjectTemplate} onChange={event=>setInstallmentSubjectTemplate(event.target.value)}/></label>
+          <label>Mensagem — um parcelamento<textarea rows={8} value={installmentMessageTemplate} onChange={event=>setInstallmentMessageTemplate(event.target.value)}/></label>
+          <label>Assunto — vários parcelamentos<input value={installmentGroupSubjectTemplate} onChange={event=>setInstallmentGroupSubjectTemplate(event.target.value)}/></label>
+          <label>Mensagem — vários parcelamentos<textarea rows={8} value={installmentGroupMessageTemplate} onChange={event=>setInstallmentGroupMessageTemplate(event.target.value)}/></label>
+          <small>Variáveis adicionais: {"{{cliente_curto}}"}, {"{{competencia_hifen}}"} e {"{{competencias_hifen}}"}. O sistema escolhe automaticamente o texto singular ou plural pela quantidade de anexos.</small>
+          <Button disabled={!configured.includes("gmail")} onClick={()=>void saveEmailTemplate()}><I.Save/>Salvar mensagens de e-mail</Button>
           {!gmailReady && (
             <small>
               Configure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e APP_URL no
