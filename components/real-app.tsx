@@ -139,7 +139,7 @@ export function RealApp() {
       null,
     ),
     [collapsed, setCollapsed] = useState(false),
-    [period, setPeriod] = useState("07/2026"),
+    [period, setPeriod] = useState(""),
     [data, setData] = useState<Data>(empty),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
@@ -328,23 +328,23 @@ function Header({
               aria-label="Competência"
               value={period}
               onChange={(e) => setPeriod(e.target.value)}
-              placeholder="MM/AAAA"
+              placeholder="Todos"
               onClick={(e) => e.stopPropagation()}
             />
             <I.ChevronDown size={16} />
           </button>
           {open === "date" && (
             <div className="dropdown periodmenu">
-              {["07/2026", "06/2026", "05/2026", "04/2026"].map((p) => (
+              {["", "07/2026", "06/2026", "05/2026", "04/2026"].map((p) => (
                 <button
                   className={period === p ? "selected" : ""}
-                  key={p}
+                  key={p || "all"}
                   onClick={() => {
                     setPeriod(p);
                     setOpen("");
                   }}
                 >
-                  {p}
+                  {p || "Todos"}
                 </button>
               ))}
             </div>
@@ -752,7 +752,9 @@ function ImportPage({
     [uploads,setUploads]=useState<Record<string,{progress:number,status:string,error?:string}>>({}),
     [messages, setMessages] = useState<string[]>([]);
   const input = useRef<HTMLInputElement>(null);
+  const validPeriod=/^(0[1-9]|1[0-2])\/\d{4}$/.test(period);
   async function process() {
+    if(!validPeriod){setMessages(["Selecione uma competência no topo da página antes de iniciar o processamento."]);return}
     setBusy(true);
     const batchId=crypto.randomUUID();
     const uploadedIds:string[]=[];
@@ -785,7 +787,9 @@ function ImportPage({
     <>
       <Title
         title={kind === "PARCELAMENTO" ? "Importar Parcelamentos" : "Importar Guias"}
-        sub={`Os ${kind === "PARCELAMENTO" ? "parcelamentos" : "arquivos"} serão armazenados no Supabase e processados na competência ${period}.`}
+        sub={validPeriod
+          ? `Os ${kind === "PARCELAMENTO" ? "parcelamentos" : "arquivos"} serão armazenados no Supabase e processados na competência ${period}.`
+          : "Selecione uma competência no topo da página antes de importar os PDFs."}
       />
       <section
         className="drop"
@@ -820,7 +824,7 @@ function ImportPage({
       </section>
       {files.length > 0 && (
         <><div className="uploads">{files.map(file=>{const state=uploads[file.name];return <div key={`${file.name}-${file.size}`}><I.FileText/><p><b>{file.name}</b><small>{state?.error||state?.status||"Pronto para enviar"}</small></p><div className="progress"><span style={{width:`${state?.progress||0}%`}}/></div><Badge status={state?.status||"Pronto"}/></div>})}</div><div className="upload-actions">
-          <Button onClick={process} disabled={busy}>
+          <Button onClick={process} disabled={busy || !validPeriod}>
             {busy ? (
               <>
                 <I.LoaderCircle className="spin" />

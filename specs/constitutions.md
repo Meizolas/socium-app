@@ -122,11 +122,11 @@ O Dockerfile faz instalação limpa (`npm ci`), build em estágio separado e exe
 
 `app/page.tsx` sempre renderiza `RealApp`. `components/app.tsx` é uma demonstração/protótipo legado e não é selecionado por `NEXT_PUBLIC_DEMO_MODE`.
 
-`RealApp` é um único Client Component grande. Mantém página ativa, competência, dados, estado de carregamento, alertas e seleção de cliente. Consulta `GET /api/dashboard` ao montar e novamente a cada **2 segundos**. O filtro de competência começa fixo em `07/2026`; preferências de usuário existentes no banco ainda não são usadas.
+`RealApp` é um único Client Component grande. Mantém página ativa, competência, dados, estado de carregamento, alertas e seleção de cliente. Consulta `GET /api/dashboard` ao montar e novamente a cada **2 segundos**. O filtro de competência começa em **Todos** (valor interno vazio); preferências de usuário existentes no banco ainda não são usadas. As telas de importação exigem que uma competência válida `MM/AAAA` seja escolhida antes do upload.
 
 ### 5.1 Páginas
 
-- **Visão geral:** métricas de documentos, enviados, processando e com atenção; lista recente; filtro por tipo de guia.
+- **Visão geral:** métricas de documentos, enviados, processando e com atenção; por padrão considera todas as competências e mostra as 10 importações mais recentes, reunindo guias e parcelamentos; permite filtro por tipo fiscal.
 - **Importar Guias:** seleção/drag-and-drop de múltiplos PDFs, progresso individual via XHR e criação de lote classificado como `GUIA`.
 - **Importar Parcelamentos:** o mesmo pipeline de upload, n8n, associação e lote, classificado como `PARCELAMENTO` para usar mensagens específicas no Gmail.
 - **Processamentos:** busca, seleção múltipla, download ZIP, reprocessamento, envio manual, conclusão do cliente e exclusão.
@@ -390,7 +390,7 @@ specs/constitutions.md  Este documento
 - Tipos do banco/API são escritos manualmente; não há tipos gerados do Supabase.
 - Polling integral a cada 2 segundos recarrega conjuntos grandes e pode escalar mal.
 - Dashboard limita documentos/processamentos a 100, mas busca todas as entregas, sem paginação.
-- Competência inicial está fixa em `07/2026` e não é derivada da data/configuração.
+- A lista de competências disponíveis no cabeçalho ainda é fixa; novos meses precisam ser adicionados ao frontend ou passar a vir do banco.
 - Não há autenticação nem suporte multiusuário funcional.
 - Não há endpoint de excluir/desativar clientes, resolver alertas ou editar metadados extraídos.
 - `contacts`, `notifications`, `audit_logs`, `office_settings`, `user_preferences` e `processing_steps` estão subutilizadas ou inativas.
@@ -436,3 +436,11 @@ specs/constitutions.md  Este documento
 - Criada `supabase/migrations/013_installment_imports.sql`.
 - Arquivos principais alterados: `components/real-app.tsx`, `app/api/documents/route.ts`, `app/api/documents/[id]/retry/route.ts`, `app/api/n8n/callback/route.ts`, `app/api/settings/integrations/route.ts`, `lib/deliveries.ts` e este documento.
 - Validação: `npm run build` concluído com sucesso. `npm run lint` continua falhando por 6 erros e 7 avisos preexistentes, concentrados no protótipo legado e em regras novas do React/ESLint sobre efeitos; não foram introduzidos erros de compilação pela feature.
+
+### 28/08/2026 — atividades recentes sem filtro mensal padrão
+
+- O filtro global de competência agora inicia em **Todos**.
+- A Visão Geral passa a mostrar, por padrão, as 10 importações mais recentes de qualquer competência, reunindo guias e parcelamentos.
+- O filtro por mês continua disponível no cabeçalho.
+- As telas de importação bloqueiam o envio enquanto não houver uma competência válida selecionada.
+- Arquivos alterados: `components/real-app.tsx` e este documento.
