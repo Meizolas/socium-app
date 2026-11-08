@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- teste executado diretamente como CommonJS pelo Node */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");

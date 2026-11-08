@@ -162,13 +162,15 @@ export function RealApp() {
     }
   }, []);
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).has("gmail"))
-      setPage("Configurações");
+    const timer=window.setTimeout(()=>{
+      if (new URLSearchParams(window.location.search).has("gmail")) setPage("Configurações");
+    },0);
+    return()=>window.clearTimeout(timer);
   }, []);
   useEffect(() => {
-    void load();
+    const initial = window.setTimeout(() => void load(), 0);
     const timer = window.setInterval(() => void load(true), 2000);
-    return () => window.clearInterval(timer);
+    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [load]);
   const filteredJobs = useMemo(
     () => data.jobs.filter((j) => !period || j.competence === period),
@@ -1023,12 +1025,14 @@ function Clients({
     [query, setQuery] = useState(""),
     [editing, setEditing] = useState<Client | null | undefined>();
   useEffect(() => {
-    if (seed) setEditing(null);
+    const timer=seed?window.setTimeout(()=>setEditing(null),0):undefined;
+    return()=>window.clearTimeout(timer);
   }, [seed]);
   useEffect(() => {
     if(!editClientId)return;
     const client=initial.find((item)=>item.id===editClientId);
-    if(client){setSelected(client.id);setEditing(client)}
+    const timer=client?window.setTimeout(()=>{setSelected(client.id);setEditing(client)},0):undefined;
+    return()=>window.clearTimeout(timer);
   }, [editClientId,initial]);
   const shown = initial.filter((c) =>
       (c.legal_name + c.cnpj + (c.email || ""))
@@ -1388,14 +1392,13 @@ function Settings({ officeId }: { officeId: string }) {
     const query = new URLSearchParams(window.location.search),
       gmail = query.get("gmail"),
       detail = query.get("message");
-    if (gmail === "connected")
-      setMessage("Conta Google conectada com sucesso.");
-    if (gmail === "error")
-      setMessage(
-        `Erro ao conectar o Google: ${detail || "retorno OAuth inválido."}`,
-      );
+    const timer=window.setTimeout(()=>{
+      if (gmail === "connected") setMessage("Conta Google conectada com sucesso.");
+      if (gmail === "error") setMessage(`Erro ao conectar o Google: ${detail || "retorno OAuth inválido."}`);
+    },0);
     if (gmail)
       window.history.replaceState({}, "", window.location.pathname);
+    return()=>window.clearTimeout(timer);
   }, []);
   async function saveEvolution() {
     setMessage("Salvando…");

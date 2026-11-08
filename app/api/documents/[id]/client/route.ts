@@ -15,7 +15,7 @@ export async function POST(_:Request,{params}:{params:Promise<{id:string}>}){
     if(document.data.client_id)return Response.json({clientId:document.data.client_id,created:false});
     const cnpj=normalizeCnpj(document.data.extracted_cnpj);
     if(cnpj.length!==14)return Response.json({error:'O documento não possui um CNPJ válido extraído.'},{status:400});
-    let client=await db.from('clients').select('id').eq('office_id',officeId).eq('cnpj',cnpj).maybeSingle();
+    const client=await db.from('clients').select('id').eq('office_id',officeId).eq('cnpj',cnpj).maybeSingle();
     if(client.error)throw new Error(client.error.message);
     let clientId=client.data?.id;
     if(!clientId){

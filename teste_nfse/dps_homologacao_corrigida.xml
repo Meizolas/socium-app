@@ -1,0 +1,50 @@
+<?xml version='1.0' encoding='utf-8'?>
+<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01">
+  <infDPS Id="DPS293330721946314200011300001000000000000001">
+    <tpAmb>2</tpAmb>
+    <dhEmi>2026-11-08T11:12:30-03:00</dhEmi>
+    <verAplic>SociumTeste_0.1</verAplic>
+    <serie>1</serie>
+    <nDPS>1</nDPS>
+    <dCompet>2026-11-08</dCompet>
+    <tpEmit>1</tpEmit>
+    <finNFSe>0</finNFSe>
+    <cLocEmi>2933307</cLocEmi>
+    <prest>
+      <CNPJ>19463142000113</CNPJ>
+      <regTrib>
+        <opSimpNac>3</opSimpNac>
+        <regApTribSN>1</regApTribSN>
+        <regEspTrib>0</regEspTrib>
+      </regTrib>
+    </prest>
+    <toma>
+      <CNPJ>42057096000174</CNPJ>
+      <xNome>GMS ACESSORIOS PARA MOTOCICLETAS LTDA</xNome>
+    </toma>
+    <serv>
+      <locPrest>
+        <cLocPrestacao>2933307</cLocPrestacao>
+      </locPrest>
+      <cServ>
+        <cTribNac>171901</cTribNac>
+        <cNBS>113022100</cNBS>
+        <xDescServ>TESTE EM HOMOLOGACAO SEM VALIDADE FISCAL - Servicos de contabilidade, inclusive servicos tecnicos e auxiliares.</xDescServ>
+      </cServ>
+    </serv>
+    <valores>
+      <vServPrest>
+        <vServ>1.00</vServ>
+      </vServPrest>
+      <trib>
+        <tribMun>
+          <tribISSQN>1</tribISSQN>
+          <tpRetISSQN>1</tpRetISSQN>
+        </tribMun>
+        <totTrib>
+          <pTotTribSN>6.00</pTotTribSN>
+        </totTrib>
+      </trib>
+    </valores>
+  </infDPS>
+</DPS>

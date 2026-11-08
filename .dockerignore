@@ -4,6 +4,14 @@ node_modules
 .env
 .env.*
 !.env.example
+*.pfx
+*.p12
+*.pem
+*.key
+certificado
+.venv
+__pycache__
+teste_nfse/resultados*
 storage
 npm-debug.log*
 README.md

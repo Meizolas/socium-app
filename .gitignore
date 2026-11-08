@@ -4,5 +4,15 @@ node_modules
 .env
 .env.*
 !.env.example
+*.pfx
+*.p12
+*.pem
+*.key
+certificado/
+.venv/
+__pycache__/
+*.pyc
+services/nfse/runtime/
+teste_nfse/resultados*/
 storage/*
 !storage/.gitkeep

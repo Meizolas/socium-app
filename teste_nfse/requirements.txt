@@ -1,0 +1,2 @@
+cryptography>=42,<47
+lxml>=5,<7

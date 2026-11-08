@@ -1,0 +1,5 @@
+import {createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
+function key(){const raw=process.env.NFSE_CUSTODY_KEY_V1;if(!raw)throw new Error('Custódia NFS-e não configurada.');const value=Buffer.from(raw,'base64');if(value.length!==32)throw new Error('NFSE_CUSTODY_KEY_V1 inválida.');return value}
+export function custodyReady(){try{key();return true}catch{return false}}
+export function sealSecret(data:Buffer,aad:string){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',key(),iv);cipher.setAAD(Buffer.from(aad));const encrypted=Buffer.concat([cipher.update(data),cipher.final()]);return `v1.${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${encrypted.toString('base64url')}`}
+export function openSecret(value:string,aad:string){const [version,iv,tag,data]=value.split('.');if(version!=='v1'||!data)throw new Error('Envelope inválido.');const decipher=createDecipheriv('aes-256-gcm',key(),Buffer.from(iv,'base64url'));decipher.setAAD(Buffer.from(aad));decipher.setAuthTag(Buffer.from(tag,'base64url'));return Buffer.concat([decipher.update(Buffer.from(data,'base64url')),decipher.final()])}

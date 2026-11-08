@@ -1,0 +1,8 @@
+FROM python:3.13.9-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && useradd --system --uid 10001 nfse
+COPY nfse ./nfse
+USER nfse
+ENV PYTHONUNBUFFERED=1
+CMD ["python","-m","nfse.worker"]
