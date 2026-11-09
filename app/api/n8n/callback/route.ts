@@ -94,8 +94,8 @@ export async function POST(req:Request){
     }
     if(!failed&&!(clientNeedsCompletion&&cnpj)&&!(p.currentStep&&p.currentStep<4)){
       const relation=Array.isArray(current.data.documents)?current.data.documents[0]:current.data.documents;
-      if(relation?.batch_id)await attemptBatchDelivery(relation.batch_id);
-      else if(clientId&&!clientNeedsCompletion)await attemptDocumentDelivery(documentId);
+      if(relation?.batch_id)await attemptBatchDelivery(relation.batch_id,officeId);
+      else if(clientId&&!clientNeedsCompletion)await attemptDocumentDelivery(documentId,officeId);
     }
     return Response.json({received:true,processingId});
   }catch(error){

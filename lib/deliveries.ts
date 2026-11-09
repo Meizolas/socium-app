@@ -1,5 +1,5 @@
 import { getCredential } from "./credentials";
-import { supabaseAdmin } from "./supabase-server";
+import { getOfficeId, supabaseAdmin } from "./supabase-server";
 
 type Channel = "email" | "whatsapp";
 type ChannelResult = {
@@ -139,8 +139,8 @@ function friendlyGoogleError(body: {
   );
 }
 
-export async function sendWhatsApp(documentId: string) {
-  const credential = await getCredential("evolution");
+export async function sendWhatsApp(documentId: string, scopedOfficeId?: string) {
+  const credential = await getCredential("evolution", scopedOfficeId);
   if (!credential)
     throw new Error(
       "WhatsApp não configurado. Altere o cliente para Somente e-mail ou configure a integração no servidor.",
@@ -176,10 +176,10 @@ export async function sendWhatsApp(documentId: string) {
   return true;
 }
 
-export async function sendGmailDocuments(documentIds: string[]) {
+export async function sendGmailDocuments(documentIds: string[], scopedOfficeId?: string) {
   const ids = [...new Set(documentIds)];
   if (!ids.length) throw new Error("Nenhum documento informado para envio.");
-  const credential = await getCredential("gmail");
+  const credential = await getCredential("gmail", scopedOfficeId);
   if (!credential) throw new Error("Conta Google ainda não conectada.");
   const clientId = process.env.GOOGLE_CLIENT_ID,
     clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -188,7 +188,7 @@ export async function sendGmailDocuments(documentIds: string[]) {
       "OAuth do Google incompleto. Reconecte a conta em Configurações.",
     );
   const db = supabaseAdmin(),
-    query = await db.from("documents").select("*,clients(*)").in("id", ids);
+    query = await db.from("documents").select("*,clients(*)").in("id", ids).eq("office_id", scopedOfficeId || await getOfficeId());
   if (query.error) throw new Error(query.error.message);
   const docs = query.data || [];
   if (docs.length !== ids.length)
@@ -329,16 +329,18 @@ export async function sendGmailDocuments(documentIds: string[]) {
   );
   return true;
 }
-export async function sendGmail(documentId: string) {
-  return sendGmailDocuments([documentId]);
+export async function sendGmail(documentId: string, scopedOfficeId?: string) {
+  return sendGmailDocuments([documentId], scopedOfficeId);
 }
 
-export async function attemptBatchDelivery(batchId: string) {
-  const db = supabaseAdmin(),
+export async function attemptBatchDelivery(batchId: string, scopedOfficeId?: string) {
+  const officeId = scopedOfficeId || await getOfficeId(),
+    db = supabaseAdmin(),
     docs = await db
       .from("documents")
       .select("id,office_id,client_id,status,batch_size")
-      .eq("batch_id", batchId);
+      .eq("batch_id", batchId)
+      .eq("office_id", officeId);
   if (docs.error) throw new Error(docs.error.message);
   const rows = docs.data || [];
   if (!rows.length) return { waiting: false, groups: 0 };
@@ -385,7 +387,7 @@ export async function attemptBatchDelivery(batchId: string) {
       .update({ status: "Enviando" })
       .in("id", pendingIds);
     try {
-      await sendGmailDocuments(pendingIds);
+      await sendGmailDocuments(pendingIds, officeId);
       await db
         .from("documents")
         .update({ status: "Enviado" })
@@ -433,14 +435,16 @@ export async function attemptBatchDelivery(batchId: string) {
   return { waiting: false, groups: groups.size };
 }
 
-export async function attemptDocumentDelivery(documentId: string) {
-  const db = supabaseAdmin(),
+export async function attemptDocumentDelivery(documentId: string, scopedOfficeId?: string) {
+  const officeId = scopedOfficeId || await getOfficeId(),
+    db = supabaseAdmin(),
     document = await db
       .from("documents")
       .select(
         "id,office_id,status,clients(preference,auto_created,email,additional_emails,whatsapp)",
       )
       .eq("id", documentId)
+      .eq("office_id", officeId)
       .single();
   if (document.error) throw new Error(document.error.message);
   const client = Array.isArray(document.data.clients)
@@ -490,8 +494,8 @@ export async function attemptDocumentDelivery(documentId: string) {
       continue;
     }
     try {
-      if (channel === "email") await sendGmail(documentId);
-      else await sendWhatsApp(documentId);
+      if (channel === "email") await sendGmail(documentId, officeId);
+      else await sendWhatsApp(documentId, officeId);
       results.push({ channel, status: "sent" });
     } catch (error) {
       const message =

@@ -1,0 +1,4 @@
+import {NextResponse,type NextRequest} from 'next/server';import {requireAppContext} from '@/lib/auth-context';
+const open=['/api/auth/','/api/logo','/api/n8n/callback','/api/integrations/gmail/callback'];
+export async function proxy(request:NextRequest){const path=request.nextUrl.pathname;if(open.some(x=>path.startsWith(x)))return NextResponse.next();try{const context=await requireAppContext(request,path.startsWith('/api/nfse/')?'nfse':'documentos'),h=new Headers(request.headers);h.set('x-socium-office-id',context.officeId);h.set('x-socium-user-id',context.userId);h.delete('x-n8n-secret');return NextResponse.next({request:{headers:h}})}catch(error){const status=typeof error==='object'&&error&&'status'in error?Number(error.status):500;return NextResponse.json({error:error instanceof Error?error.message:'Acesso negado.'},{status})}}
+export const config={matcher:'/api/:path*'};

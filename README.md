@@ -40,3 +40,17 @@ npm run build
 ```
 
 PDFs são verificados por MIME, limite e assinatura `%PDF`; hashes SHA-256 detectam duplicidade antes do envio. Para produção, substitua o armazenamento local pelo bucket privado e gere URLs assinadas de curta duração para o n8n. Defina retenção, base legal, controle de acesso e descarte de dados segundo a política LGPD do escritório.
+# Fluxo NFS-e local integrado
+
+O modo abaixo é exclusivamente local e usa provedor marcado como `SIMULATED_LOCAL`. Ele é bloqueado quando `NODE_ENV=production`, quando `APP_ENV` não é `local/test` ou quando `SOCIUM_LOCAL_E2E` não está explicitamente ativo.
+
+```powershell
+npm install
+python -m pip install -r services\nfse\requirements.txt
+.\scripts\setup-local.ps1
+.\scripts\run-local-web.ps1
+# em outro terminal
+.\scripts\run-local-worker.ps1
+```
+
+Abra `http://127.0.0.1:3100` e use `nfse.local@example.test` / `Local-Nfse-2026!`. O certificado fica em `.local-data\fixtures\synthetic.pfx`, com senha `Synthetic-2026!`. Todos esses dados são sintéticos e não devem ser reutilizados fora do ambiente local.

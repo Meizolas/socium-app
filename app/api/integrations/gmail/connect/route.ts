@@ -1,10 +1,2 @@
-import {getOfficeId} from '@/lib/supabase-server';
-import {createOAuthState,googleOAuthConfig} from '@/lib/google-oauth';
-
-export async function GET(){
-  try{
-    const {clientId,redirectUri}=googleOAuthConfig(),officeId=await getOfficeId();
-    const query=new URLSearchParams({client_id:clientId,redirect_uri:redirectUri,response_type:'code',access_type:'offline',prompt:'consent',include_granted_scopes:'true',scope:'openid email https://www.googleapis.com/auth/gmail.send',state:createOAuthState(officeId)});
-    return Response.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${query}`);
-  }catch(error){const message=error instanceof Error?error.message:'Erro ao iniciar OAuth.';return Response.json({error:message},{status:500})}
-}
+import {requireAppContext,authError} from '@/lib/auth-context';import {createOAuthState,googleOAuthConfig} from '@/lib/google-oauth';import {supabaseAdmin} from '@/lib/supabase-server';
+export async function GET(request:Request){try{const c=await requireAppContext(request,'documentos',['admin']),{clientId,redirectUri}=googleOAuthConfig(),state=createOAuthState(c.officeId,c.userId),saved=await supabaseAdmin().from('oauth_nonces').insert({office_id:c.officeId,user_id:c.userId,provider:'gmail',nonce_hash:state.nonceHash,expires_at:new Date(Date.now()+600000).toISOString()});if(saved.error)throw new Error(saved.error.message);const query=new URLSearchParams({client_id:clientId,redirect_uri:redirectUri,response_type:'code',access_type:'offline',prompt:'consent',include_granted_scopes:'true',scope:'openid email https://www.googleapis.com/auth/gmail.send',state:state.state});return Response.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${query}`)}catch(e){return authError(e)}}

@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "./supabase-server";
+import {localMode} from './local-db';
+import {localContext} from './local-session';
 
 export type AppModule = "documentos" | "nfse";
 export type AppRole = "admin" | "operator";
@@ -7,13 +9,20 @@ export type AppContext = { userId:string; officeId:string; role:AppRole; effecti
 
 export class AuthError extends Error { constructor(message:string,public status:401|403){super(message)} }
 
-function bearer(request:Request){
-  const value=request.headers.get("authorization")||"";
-  return value.startsWith("Bearer ")?value.slice(7):"";
+export function sessionToken(request:Request){
+  const value=request.headers.get("authorization")||"",cookie=request.headers.get("cookie")||"";
+  const stored=cookie.split(";").map(x=>x.trim()).find(x=>x.startsWith("socium_session="))?.slice(15);
+  return value.startsWith("Bearer ")?value.slice(7):decodeURIComponent(stored||"");
 }
 
 export async function requireAppContext(request:Request,module?:AppModule,roles?:AppRole[]):Promise<AppContext>{
-  const token=bearer(request);
+  if(localMode()){
+    const context=await localContext(request);
+    if(module&&!context.effectiveModules.includes(module))throw new AuthError('Módulo não habilitado para esta conta.',403);
+    if(roles&&!roles.includes(context.role))throw new AuthError('Papel sem permissão para esta operação.',403);
+    return context;
+  }
+  const token=sessionToken(request);
   if(!token)throw new AuthError("Autenticação necessária.",401);
   const url=process.env.NEXT_PUBLIC_SUPABASE_URL,anon=process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if(!url||!anon)throw new Error("Supabase Auth não configurado.");
@@ -30,7 +39,8 @@ export async function requireAppContext(request:Request,module?:AppModule,roles?
   const denied=new Set((restrictions.data||[]).filter(x=>!x.allowed).map(x=>x.module));
   const effectiveModules=(modules.data||[]).filter(x=>x.status==="active"&&!denied.has(x.module)).map(x=>x.module) as AppModule[];
   const scope=await db.from("nfse_profile_issuer_access").select("issuer_id,allowed").eq("profile_id",user.id);
-  const context:AppContext={userId:user.id,officeId:profile.data.office_id,role:profile.data.role as AppRole,effectiveModules,issuerScope:scope.error?null:(scope.data||[]).filter(x=>x.allowed).map(x=>x.issuer_id)};
+  const issuerRules=scope.error?[]:(scope.data||[]);
+  const context:AppContext={userId:user.id,officeId:profile.data.office_id,role:profile.data.role as AppRole,effectiveModules,issuerScope:issuerRules.length?issuerRules.filter(x=>x.allowed).map(x=>x.issuer_id):null};
   if(module&&!effectiveModules.includes(module))throw new AuthError("Módulo não habilitado para esta conta.",403);
   if(roles&&!roles.includes(context.role))throw new AuthError("Papel sem permissão para esta operação.",403);
   return context;
@@ -38,6 +48,14 @@ export async function requireAppContext(request:Request,module?:AppModule,roles?
 
 export function authError(error:unknown){
   if(error instanceof AuthError)return Response.json({error:error.message},{status:error.status});
+  if(error instanceof Error&&'status' in error&&(error.status===401||error.status===403))return Response.json({error:error.message},{status:error.status});
   const message=error instanceof Error?error.message:"Erro interno.";
   return Response.json({error:message},{status:500});
+}
+
+export function supabaseForSession(request:Request){
+  const token=sessionToken(request),url=process.env.NEXT_PUBLIC_SUPABASE_URL,anon=process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if(!token)throw new AuthError('Autenticação necessária.',401);
+  if(!url||!anon)throw new Error('Supabase Auth não configurado.');
+  return createClient(url,anon,{global:{headers:{Authorization:`Bearer ${token}`}},auth:{persistSession:false,autoRefreshToken:false}});
 }

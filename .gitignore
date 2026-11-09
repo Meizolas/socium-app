@@ -16,3 +16,5 @@ services/nfse/runtime/
 teste_nfse/resultados*/
 storage/*
 !storage/.gitkeep
+.local-data/
+.next-stale/

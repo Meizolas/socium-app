@@ -1,0 +1,8 @@
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment: {POSTGRES_PASSWORD: local-only, POSTGRES_DB: socium_local}
+    ports: ["127.0.0.1:55433:5432"]
+    volumes: ["socium_local_pg:/var/lib/postgresql/data"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U postgres -d socium_local"], interval: 2s, timeout: 2s, retries: 30}
+volumes: {socium_local_pg: {}}

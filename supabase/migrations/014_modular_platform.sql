@@ -10,6 +10,7 @@ create table offer_interests(id uuid primary key default gen_random_uuid(),offic
 create unique index offer_interests_one_pending on offer_interests(office_id) where status='pending';
 create table office_invitations(id uuid primary key default gen_random_uuid(),office_id uuid not null references offices on delete cascade,email_hash text not null,token_hash text not null unique,role text not null check(role in ('admin','operator')),expires_at timestamptz not null,accepted_at timestamptz,revoked_at timestamptz,invited_by uuid not null references profiles,created_at timestamptz not null default now());
 create table onboarding_requests(id uuid primary key default gen_random_uuid(),auth_user_id uuid not null references auth.users,idempotency_key text not null,office_id uuid references offices,office_name text not null,office_tax_id text,offer text not null check(offer in ('documentos','nfse','completo')),status text not null default 'pending',created_at timestamptz not null default now(),updated_at timestamptz not null default now(),unique(auth_user_id,idempotency_key));
+create table oauth_nonces(id uuid primary key default gen_random_uuid(),office_id uuid not null references offices on delete cascade,user_id uuid not null references profiles on delete cascade,provider text not null check(provider='gmail'),nonce_hash text not null unique,expires_at timestamptz not null,consumed_at timestamptz,created_at timestamptz not null default now());
 
 create or replace function complete_public_onboarding(p_name text,p_office_name text,p_tax_id text,p_offer text,p_key text) returns uuid language plpgsql security definer set search_path=public,pg_temp as $$
 declare u uuid:=auth.uid(); o uuid; r onboarding_requests;
@@ -32,7 +33,7 @@ create or replace function has_module(m app_module) returns boolean language sql
 revoke all on function has_module(app_module) from public,anon;
 grant execute on function has_module(app_module) to authenticated;
 
-alter table office_modules enable row level security; alter table profile_module_access enable row level security; alter table offer_interests enable row level security; alter table office_invitations enable row level security; alter table onboarding_requests enable row level security;
+alter table office_modules enable row level security; alter table profile_module_access enable row level security; alter table offer_interests enable row level security; alter table office_invitations enable row level security; alter table onboarding_requests enable row level security; alter table oauth_nonces enable row level security;
 create policy office_modules_read on office_modules for select to authenticated using(office_id=current_office());
 create policy profile_module_read on profile_module_access for select to authenticated using(profile_id=auth.uid());
 create policy offer_read on offer_interests for select to authenticated using(office_id=current_office());
