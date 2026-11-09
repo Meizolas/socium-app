@@ -1,3 +1,60 @@
-import {requireAppContext,authError} from '@/lib/auth-context';import {issuerInput} from '@/lib/nfse/contracts';import {supabaseAdmin} from '@/lib/supabase-server';
-export async function GET(request:Request){try{const c=await requireAppContext(request,'nfse'),r=await supabaseAdmin().from('nfse_issuers').select('id,tax_id,legal_name,municipality_ibge,tax_regime,dps_series,enabled').eq('office_id',c.officeId).order('legal_name');if(r.error)throw new Error(r.error.message);return Response.json({issuers:r.data})}catch(e){return authError(e)}}
-export async function POST(request:Request){try{const c=await requireAppContext(request,'nfse',['admin']),p=issuerInput.safeParse(await request.json());if(!p.success)return Response.json({error:'Dados inválidos.',issues:p.error.issues},{status:400});const x=p.data,r=await supabaseAdmin().from('nfse_issuers').insert({office_id:c.officeId,tax_id:x.taxId,legal_name:x.legalName,municipal_registration:x.municipalRegistration||null,municipality_ibge:x.municipalityIbge,tax_regime:x.taxRegime,dps_series:x.dpsSeries,enabled:false}).select('id').single();if(r.error)throw new Error(r.error.message);return Response.json(r.data,{status:201})}catch(e){return authError(e)}}
+import { requireAppContext, authError } from "@/lib/auth-context";
+import { issuerInput } from "@/lib/nfse/contracts";
+import { supabaseAdmin } from "@/lib/supabase-server";
+export async function GET(request: Request) {
+	try {
+		const c = await requireAppContext(request, "nfse");
+		let q = supabaseAdmin()
+			.from("nfse_issuers")
+			.select(
+				"id,tax_id,legal_name,municipality_ibge,tax_regime,dps_series,enabled",
+			)
+			.eq("office_id", c.officeId)
+			.order("legal_name");
+		if (c.issuerScope)
+			q = q.in(
+				"id",
+				c.issuerScope.length
+					? c.issuerScope
+					: ["00000000-0000-0000-0000-000000000000"],
+			);
+		const r = await q;
+		if (r.error) throw new Error(r.error.message);
+		return Response.json({ issuers: r.data });
+	} catch (e) {
+		return authError(e);
+	}
+}
+export async function POST(request: Request) {
+	try {
+		const c = await requireAppContext(request, "nfse", ["admin"]),
+			p = issuerInput.safeParse(await request.json());
+		if (!p.success)
+			return Response.json(
+				{ error: "Dados inválidos.", issues: p.error.issues },
+				{ status: 400 },
+			);
+		const x = p.data,
+			r = await supabaseAdmin()
+				.from("nfse_issuers")
+				.insert({
+					office_id: c.officeId,
+					tax_id: x.taxId,
+					legal_name: x.legalName,
+					municipal_registration: x.municipalRegistration || null,
+					municipality_ibge: x.municipalityIbge,
+					tax_regime: x.taxRegime,
+					dps_series: x.dpsSeries,
+					enabled: false,
+					simple_national_option:x.simpleNationalOption,
+					simple_national_taxation_regime:x.simpleNationalTaxationRegime,
+					special_tax_regime:x.specialTaxRegime,
+				})
+				.select("id")
+				.single();
+		if (r.error) throw new Error(r.error.message);
+		return Response.json(r.data, { status: 201 });
+	} catch (e) {
+		return authError(e);
+	}
+}

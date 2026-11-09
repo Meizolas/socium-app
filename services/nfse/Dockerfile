@@ -1,8 +1,11 @@
 FROM python:3.13.9-slim
 WORKDIR /app
-COPY requirements.txt .
+COPY services/nfse/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && useradd --system --uid 10001 nfse
-COPY nfse ./nfse
+COPY services/nfse/nfse ./nfse
+COPY teste_nfse/esquemas_xsd ./xsd
 USER nfse
 ENV PYTHONUNBUFFERED=1
+ENV NFSE_DPS_XSD=/app/xsd/DPS_v1.01.xsd
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD ["python","-m","nfse.healthcheck"]
 CMD ["python","-m","nfse.worker"]

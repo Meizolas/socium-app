@@ -54,3 +54,34 @@ python -m pip install -r services\nfse\requirements.txt
 ```
 
 Abra `http://127.0.0.1:3100` e use `nfse.local@example.test` / `Local-Nfse-2026!`. O certificado fica em `.local-data\fixtures\synthetic.pfx`, com senha `Synthetic-2026!`. Todos esses dados são sintéticos e não devem ser reutilizados fora do ambiente local.
+
+O roteiro pelas telas é: entrar → escolher Emissor NFS-e → Cadastros fiscais → cadastrar emitente, perfil de serviço e tomador → Configurações → adicionar o certificado sintético → Emitir NFS-e → preencher as seis etapas → Emitir em simulação → aguardar o worker → baixar `nfse-simulada-*.xml`. Esse arquivo contém `NFSeSimulada`, usa o header `X-NFSe-Artifact: SIMULATED_LOCAL` e não é XML oficial.
+
+Contas adicionais: `operador.local@example.test` / `Local-Operador-2026!` testa restrição por emitente; `isolado.local@example.test` / `Local-Isolado-2026!` pertence a outro escritório.
+
+```powershell
+.\scripts\test-migrations.ps1
+npm run test:nfse
+npm run test:n8n
+node scripts\test-local-flow.mjs
+python scripts\test-local-ui.py
+python scripts\test-nfse-fencing.py
+```
+
+## NFS-e em homologação governamental
+
+O adaptador `government_homologation` usa o mesmo rascunho e fila Postgres. Ele lê a custódia cifrada, gera a DPS do snapshot, valida no XSD, assina sem alterar os bytes, persiste a evidência antes do POST e armazena o XML retornado em Storage privado. Não existe fallback para simulação. `NFSE_ENVIRONMENT` precisa ser `2`; produção fiscal permanece bloqueada.
+
+No processo privado do worker configure, sem prefixo `NEXT_PUBLIC_`: `NFSE_PROVIDER=government_homologation`, `NFSE_ENVIRONMENT=2`, `NFSE_DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NFSE_CUSTODY_KEY_V1` e `NFSE_DPS_XSD`. Inicie com `cd services/nfse` e `python -m nfse.worker`.
+
+A imagem separada inclui os XSDs e healthcheck: `docker build -f services/nfse/Dockerfile -t socium-nfse-worker .`. Injete segredos apenas no runtime; certificado e chave de custódia não entram na imagem.
+
+Não execute o worker com certificado real sem autorização explícita. Antes do primeiro teste controlado, confira os artefatos em `specs/nfse/matriz-campos-dps.md`, revise o snapshot e acompanhe uma única DPS. Timeout ou queda após o limite de POST cria reconciliação; não reserva outro número e não reposta automaticamente.
+
+## NFS-e em produção governamental
+
+Produção é um modo separado e explícito. Configure o servidor web e o worker privado com `NFSE_PROVIDER=government_production`, `NFSE_ENVIRONMENT=1` e `NFSE_ENABLE_PRODUCTION=true`, além de `NFSE_DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NFSE_CUSTODY_KEY_V1` e `NFSE_DPS_XSD`. O CNPJ emitente, certificado A1, parametrização municipal e dados fiscais precisam ser reais e coerentes.
+
+Após a SEFIN autorizar, o worker preserva o XML oficial retornado e consulta o DANFSe pela chave de acesso. Somente uma resposta PDF válida é salva como `official_pdf`; o gerador PDF local nunca é usado nesse modo. Ativar essas variáveis permite emissão com valor fiscal real.
+
+Módulos são provisionados administrativamente por `office_modules`. Escolher uma oferta registra interesse, mas não concede acesso. O administrador do escritório não pode ativar módulos comerciais para si.

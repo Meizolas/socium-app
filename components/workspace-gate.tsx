@@ -8,6 +8,7 @@ type State={kind:'loading'}|{kind:'onboarding'}|{kind:'ready';context:Context}|{
 
 export function WorkspaceGate(){
   const[state,setState]=useState<State>({kind:'loading'});
+  const[selectedModule,setSelectedModule]=useState<'documentos'|'nfse'|null>(null);
   useEffect(()=>{void fetchContext().then(async response=>{
     const body=await response.json();
     if(response.ok)setState({kind:'ready',context:body});
@@ -18,8 +19,10 @@ export function WorkspaceGate(){
   if(state.kind==='onboarding')return <Onboarding onDone={()=>location.reload()}/>;
   if(state.kind==='error')return <main className="auth-shell"><p>{state.message}</p><Logout/></main>;
   const modules=state.context.effectiveModules;
-  if(modules.includes('nfse'))return <NfseWorkspace/>;
-  if(modules.includes('documentos'))return <RealApp/>;
+  if(modules.length>1&&!selectedModule)return <main className="auth-shell"><section><h1>Escolha o módulo</h1><p>Seus acessos são independentes. Você pode alternar sem misturar os fluxos.</p><div className="auth-actions"><button onClick={()=>setSelectedModule('documentos')}>Socium Documentos</button><button onClick={()=>setSelectedModule('nfse')}>Emissor NFS-e</button></div><Logout/></section></main>;
+  const active=selectedModule||modules[0];
+  if(active==='nfse'&&modules.includes('nfse'))return <NfseWorkspace/>;
+  if(active==='documentos'&&modules.includes('documentos'))return <RealApp/>;
   return <ModuleStatus title="Ativação pendente" message="Seu cadastro foi concluído, mas nenhum módulo comercial está ativo. A escolha da oferta não concede acesso automaticamente."/>;
 }
 async function fetchContext(){let response=await fetch('/api/auth/context',{cache:'no-store'});if(response.status===401){const refreshed=await fetch('/api/auth/refresh',{method:'POST'});if(refreshed.ok)response=await fetch('/api/auth/context',{cache:'no-store'})}return response}

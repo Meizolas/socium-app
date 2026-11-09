@@ -2,6 +2,7 @@ from __future__ import annotations
 import hashlib,time
 from dataclasses import dataclass,field
 from typing import Protocol
+from .core import classify
 class Transport(Protocol):
  def issue(self,dps_id:str,payload:bytes)->tuple[int,bytes]:...
  def reconcile(self,dps_id:str)->tuple[int,bytes]:...
@@ -22,9 +23,9 @@ class Worker:
    payload=job['signed_xml'];self.repository.before_post(job,payload)
    try:status,body=self.transport.issue(job['dps_id'],payload)
    except TimeoutError:self.repository.finish(job,'unknown');return
-   self.repository.finish(job,'authorized' if status in (200,201) and b'"cStat":"100"' in body else 'rejected' if status in (400,422) else 'unknown',body)
+   self.repository.finish(job,classify(status,body),body)
   else:
-   status,body=self.transport.reconcile(job['dps_id']);self.repository.finish(job,'authorized' if status==200 and b'"cStat":"100"' in body else 'reconciling',body)
+   status,body=self.transport.reconcile(job['dps_id']);result=classify(status,body);self.repository.finish(job,result if result!='unknown' else 'reconciling',body)
  def run_forever(self,interval:float=1.0)->None:
   while self.running:
    if not self.run_once():time.sleep(interval)
@@ -40,5 +41,9 @@ class MemoryRepository:
  def finish(self,job:dict,status:str,response:bytes=b'')->None:job['status']=status;self.events.append(('finish',job['id'],status,response))
 
 if __name__=='__main__':
- from .local_runtime import main
+ import os
+ if os.getenv('NFSE_PROVIDER')=='simulated':
+  from .local_runtime import main
+ else:
+  from .government_runtime import main
  main()

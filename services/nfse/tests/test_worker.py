@@ -5,8 +5,8 @@ class Provider:
  def issue(self,dps_id,payload):
   self.posts+=1
   if self.result=='timeout':raise TimeoutError()
-  return 201,b'{"cStat":"100","chaveAcesso":"synthetic"}'
- def reconcile(self,dps_id):self.reads+=1;return 200,b'{"cStat":"100","chaveAcesso":"synthetic"}'
+  return 201,b'{"chaveAcesso":"synthetic","nfseXmlGZipB64":"H4sI"}'
+ def reconcile(self,dps_id):self.reads+=1;return 200,b'{"chaveAcesso":"synthetic","nfseXmlGZipB64":"H4sI"}'
 def job(kind='issue',active=True):return{'id':'j1','kind':kind,'status':'queued','dps_id':'DPS-SYNTHETIC','signed_xml':b'<signed/>','commercial_active':active}
 class WorkerTest(unittest.TestCase):
  def test_issue_persists_evidence_before_single_post(self):

@@ -4,7 +4,7 @@ function Assert-Exit([string]$operation) {
   if ($LASTEXITCODE -ne 0) { throw "$operation falhou com codigo $LASTEXITCODE." }
 }
 function Compose([string[]]$arguments) {
-  & docker compose -f (Join-Path $root 'docker-compose.migrations.yml') @arguments
+  & docker compose -p socium-migrations -f (Join-Path $root 'docker-compose.migrations.yml') @arguments
   Assert-Exit "docker compose $($arguments -join ' ')"
 }
 Compose @('up','-d','--wait')

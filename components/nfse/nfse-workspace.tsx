@@ -27,13 +27,19 @@ type Item = {
 	email?: string;
 	status?: string;
 	official_key?: string;
+	simulation_reference?: string;
 	competence?: string;
 	amount?: string;
 	not_after?: string;
 	subject_tax_id?: string;
+	national_code?: string;
+	municipal_code?: string;
+	nbs_code?: string;
+	municipality_ibge?: string;
 };
 type Data = {
 	simulation: boolean;
+	environment?: "government_homologation" | "government_production";
 	issuers: Item[];
 	services: Item[];
 	takers: Item[];
@@ -46,6 +52,13 @@ type Draft = {
 	competence: string;
 	amount: string;
 	description: string;
+	serviceMunicipalityIbge: string;
+	unconditionalDiscount: string;
+	conditionalDiscount: string;
+	issTaxation: "taxable" | "immune" | "export" | "not_incident";
+	issWithholding: "not_withheld" | "withheld";
+	issRate: string;
+	additionalInformation: string;
 };
 const emptyDraft: Draft = {
 	takerId: "",
@@ -53,6 +66,13 @@ const emptyDraft: Draft = {
 	competence: "2026-11-08",
 	amount: "100.00",
 	description: "",
+	serviceMunicipalityIbge: "",
+	unconditionalDiscount: "0.00",
+	conditionalDiscount: "0.00",
+	issTaxation: "taxable",
+	issWithholding: "not_withheld",
+	issRate: "2.00",
+	additionalInformation: "",
 };
 export function NfseWorkspace() {
 	const [data, setData] = useState<Data | null>(null),
@@ -117,13 +137,15 @@ export function NfseWorkspace() {
 		invoices = data.invoices.filter(
 			(x) => !issuer || x.issuer_id === issuer.id,
 		),
-		ready = Boolean(issuer && services.length && cert);
+		ready = Boolean(issuer && services.length && cert),
+		simulation = data.simulation,
+		production = data.environment === "government_production";
 	async function saveDraft(enqueue = false) {
 		if (busy) return;
 		if (!issuer || !draft.takerId || !draft.serviceProfileId)
 			return setMessage("Selecione tomador e serviço.");
 		setBusy(enqueue ? "issue" : "draft");
-		setMessage(enqueue ? "Criando o rascunho e enfileirando a simulação…" : "Salvando rascunho…");
+		setMessage(enqueue ? `Criando o rascunho e enfileirando em ${simulation ? "simulação local" : production ? "produção governamental" : "homologação governamental"}…` : "Salvando rascunho…");
 		try {
 		const saved = await post({
 			action: "draft",
@@ -140,8 +162,8 @@ export function NfseWorkspace() {
 			if (!r.ok) {setMessage(b.error || "Não foi possível enfileirar a NFS-e.");return;}
 			if (r.ok) {
 				setResultId(saved.body.id);
-				setStep(4);
-				setMessage("NFS-e simulada enfileirada. Aguardando o worker local…");
+				setStep(6);
+				setMessage(`${simulation ? "NFS-e simulada" : production ? "DPS de produção" : "DPS de homologação"} enfileirada. Aguardando o worker fiscal…`);
 				await load();
 			}
 		} else {
@@ -161,12 +183,14 @@ export function NfseWorkspace() {
 					issuers={data.issuers}
 					value={issuerId}
 					onChange={setIssuerId}
+					simulation={data.simulation}
+					production={production}
 				/>
 				<div className="nfse-content">
 					<div className="nfse-banner">
 						<div>
-							<strong>SIMULAÇÃO LOCAL - SEM VALOR FISCAL</strong>
-							<p>Nenhuma chamada ao governo ou envio externo é realizado.</p>
+							<strong>{data.simulation ? "SIMULAÇÃO LOCAL - SEM VALOR FISCAL" : production ? "PRODUÇÃO GOVERNAMENTAL — EMISSÃO COM VALOR FISCAL" : "HOMOLOGAÇÃO GOVERNAMENTAL - SEM VALOR FISCAL"}</strong>
+							<p>{data.simulation ? "Nenhuma chamada ao governo ou envio externo é realizado." : production ? "A emissão será transmitida à SEFIN Nacional e poderá gerar obrigação fiscal real." : "A integração usa somente a produção restrita configurada."}</p>
 						</div>
 						<ShieldCheck size={34} />
 					</div>
@@ -197,6 +221,8 @@ export function NfseWorkspace() {
 							refresh={load}
 							busy={busy}
 							go={setArea}
+							simulation={data.simulation}
+							production={production}
 						/>
 					)}{" "}
 					{area === "registrations" && (
@@ -249,11 +275,15 @@ function Topbar({
 	issuers,
 	value,
 	onChange,
+	simulation,
+	production,
 }: {
 	issuer?: Item;
 	issuers: Item[];
 	value: string;
 	onChange: (v: string) => void;
+	simulation: boolean;
+	production: boolean;
 }) {
 	return (
 		<header>
@@ -273,7 +303,7 @@ function Topbar({
 						))}
 					</select>
 				</label>
-				<span className="badge blue">Homologação local</span>
+				<span className="badge blue">{simulation ? "Simulação local" : production ? "Produção governamental" : "Homologação governamental"}</span>
 				<div className="avatar">
 					{issuer?.legal_name?.slice(0, 2).toUpperCase() || "NF"}
 				</div>
@@ -443,6 +473,8 @@ function Issue({
 	refresh,
 	busy,
 	go,
+	simulation,
+	production,
 }: {
 	step: number;
 	setStep: (n: number) => void;
@@ -457,17 +489,22 @@ function Issue({
 	refresh: () => Promise<void>;
 	busy: string;
 	go: (a: Area) => void;
+	simulation: boolean;
+	production: boolean;
 }) {
+	const [deliveryEmail, setDeliveryEmail] = useState("");
+	const [deliveryMessage, setDeliveryMessage] = useState("");
 	const selectedTaker = takers.find((x) => x.id === draft.takerId),
 		selectedService = services.find((x) => x.id === draft.serviceProfileId);
+	async function prepareDelivery(){if(!result)return;setDeliveryMessage("Preparando distribuição…");const response=await fetch(`/api/nfse/invoices/${result.id}/deliveries`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recipientEmail:deliveryEmail,idempotencyKey:crypto.randomUUID()})}),body=await response.json();setDeliveryMessage(response.ok?body.message:body.error||"Não foi possível preparar a distribuição.")}
 	return (
 		<>
 			<PageTitle
 				title="Emitir NFS-e"
-				text={`Etapa ${step} de 4 - ${["Tomador", "Serviço e valores", "Revisão", "Resultado"][step - 1]}`}
+				text={`Etapa ${step} de 6 - ${["Pessoas e competência", "Serviço e códigos fiscais", "Local da operação", "Valores e tributação", "Revisão", "Resultado"][step - 1]}`}
 			/>
 			<div className="nfse-steps">
-				{["Tomador", "Serviço e valores", "Revisão", "Resultado"].map(
+				{["Pessoas", "Serviço", "Local", "Valores", "Revisão", "Resultado"].map(
 					(x, i) => (
 						<span key={x} className={step >= i + 1 ? "active" : ""}>
 							<i>{i + 1}</i>
@@ -492,6 +529,7 @@ function Issue({
 								</option>
 							))}
 						</select>
+						<label className="nfse-field-block">Competência<input type="date" value={draft.competence} onChange={(e) => setDraft({ ...draft, competence: e.target.value })} /></label>
 						{!takers.length && (
 							<p className="notice">
 								Nenhum tomador cadastrado. Use Cadastros fiscais para adicionar.
@@ -501,7 +539,7 @@ function Issue({
 				)}
 				{step === 2 && (
 					<>
-						<h2>Serviço e valores</h2>
+						<h2>Serviço e códigos fiscais</h2>
 						<div className="nfse-form-grid">
 							<label>
 								Serviço
@@ -519,25 +557,7 @@ function Issue({
 									))}
 								</select>
 							</label>
-							<label>
-								Competência
-								<input
-									type="date"
-									value={draft.competence}
-									onChange={(e) =>
-										setDraft({ ...draft, competence: e.target.value })
-									}
-								/>
-							</label>
-							<label>
-								Valor
-								<input
-									value={draft.amount}
-									onChange={(e) =>
-										setDraft({ ...draft, amount: e.target.value })
-									}
-								/>
-							</label>
+							<div className="nfse-code-summary"><small>Código nacional</small><b>{selectedService?.national_code || "Defina no perfil fiscal"}</b><small>NBS</small><b>{selectedService?.nbs_code || "Não informado"}</b></div>
 							<label className="wide">
 								Descrição
 								<textarea
@@ -550,7 +570,9 @@ function Issue({
 						</div>
 					</>
 				)}
-				{step === 3 && (
+				{step === 3 && <><h2>Local e particularidades da operação</h2><div className="nfse-form-grid"><label>Município da prestação (IBGE)<input inputMode="numeric" maxLength={7} value={draft.serviceMunicipalityIbge} onChange={(e) => setDraft({...draft,serviceMunicipalityIbge:e.target.value.replace(/\D/g,"")})}/><small>Informe os sete dígitos do município onde o serviço foi prestado.</small></label><label className="wide">Informações complementares<textarea value={draft.additionalInformation} onChange={(e)=>setDraft({...draft,additionalInformation:e.target.value})}/></label></div><div className="notice">Este fluxo cobre serviço nacional sem intermediário, obra, evento, exterior ou compra governamental.</div></>}
+				{step === 4 && <><h2>Valores e tributação</h2><div className="nfse-form-grid"><label>Valor do serviço<input value={draft.amount} onChange={(e)=>setDraft({...draft,amount:e.target.value})}/></label><label>Desconto incondicionado<input value={draft.unconditionalDiscount} onChange={(e)=>setDraft({...draft,unconditionalDiscount:e.target.value})}/></label><label>Desconto condicionado<input value={draft.conditionalDiscount} onChange={(e)=>setDraft({...draft,conditionalDiscount:e.target.value})}/></label><label>Enquadramento do ISS<select value={draft.issTaxation} onChange={(e)=>setDraft({...draft,issTaxation:e.target.value as Draft["issTaxation"]})}><option value="taxable">Tributável</option><option value="immune">Imunidade</option><option value="export">Exportação</option><option value="not_incident">Não incidência</option></select></label><label>Retenção do ISS<select value={draft.issWithholding} onChange={(e)=>setDraft({...draft,issWithholding:e.target.value as Draft["issWithholding"]})}><option value="not_withheld">Não retido</option><option value="withheld">Retido</option></select></label>{draft.issTaxation==="taxable"&&<label>Alíquota ISS (%)<input value={draft.issRate} onChange={(e)=>setDraft({...draft,issRate:e.target.value})}/><small>Não é o percentual aproximado do Simples.</small></label>}</div></>}
+				{step === 5 && (
 					<>
 						<h2>Revise antes de emitir</h2>
 						<div className="nfse-review">
@@ -574,9 +596,11 @@ function Issue({
 								<small>Valor total</small>
 								<b>R$ {draft.amount}</b>
 							</p>
+							<p><small>Local da prestação</small><b>{draft.serviceMunicipalityIbge}</b><button className="nfse-edit-section" onClick={()=>setStep(3)}>Editar</button></p>
+							<p><small>ISS</small><b>{draft.issTaxation} · {draft.issWithholding}</b><button className="nfse-edit-section" onClick={()=>setStep(4)}>Editar</button></p>
 							<p>
 								<small>Ambiente</small>
-								<b>Simulação local</b>
+								<b>{simulation ? "Simulação local" : production ? "Produção governamental — valor fiscal" : "Homologação governamental"}</b>
 							</p>
 						</div>
 						<div className={`nfse-cert-state ${cert ? "ok" : "pending"}`}>
@@ -587,7 +611,7 @@ function Issue({
 						</div>
 					</>
 				)}
-				{step === 4 && (
+				{step === 6 && (
 					<>
 						<h2>Resultado do processamento</h2>
 						{result ? (
@@ -595,24 +619,23 @@ function Issue({
 								<CheckCircle2 />
 								<h3>
 									{result.status === "authorized"
-										? "NFS-e simulada autorizada"
+										? simulation ? "NFS-e simulada autorizada" : production ? "NFS-e autorizada em produção" : "NFS-e autorizada em homologação"
 										: "Processando a solicitação"}
 								</h3>
 								<p>
-									{result.official_key ||
+									{result.official_key || result.simulation_reference ||
 										"Aguarde o worker concluir o processamento."}
 								</p>
-								{result.official_key && (
-									<a
-										className="btn"
-										href={`/api/nfse/invoices/${result.id}/xml`}
-									>
-										Baixar XML
-									</a>
+								{result.status === "authorized" && (
+									<>
+										<a className="btn" href={`/api/nfse/invoices/${result.id}/xml`}>Baixar XML</a>
+										<a className="btn secondary" href={`/api/nfse/invoices/${result.id}/pdf`}>Baixar PDF</a>
+									</>
 								)}
 								<button className="nfse-refresh" onClick={refresh}>
 									Atualizar resultado
 								</button>
+								{result.status === "authorized" && <div className="nfse-delivery"><h4>Distribuição fiscal manual</h4><p>Prepare o destinatário sem enviar e-mail automaticamente.</p><input type="email" value={deliveryEmail} onChange={(e)=>setDeliveryEmail(e.target.value)} placeholder="E-mail do destinatário"/><button className="nfse-refresh" disabled={!deliveryEmail} onClick={()=>void prepareDelivery()}>Preparar distribuição</button>{deliveryMessage&&<small role="status">{deliveryMessage}</small>}</div>}
 							</div>
 						) : (
 							<p>Preparando resultado…</p>
@@ -620,12 +643,12 @@ function Issue({
 					</>
 				)}
 				<div className="nfse-wizard-actions">
-					{step > 1 && step < 4 && (
+					{step > 1 && step < 6 && (
 						<button className="btn secondary" onClick={() => setStep(step - 1)}>
 							Voltar
 						</button>
 					)}
-					{step < 3 && (
+					{step < 5 && (
 						<button
 							className="btn secondary"
 							onClick={() => void saveDraft(false)}
@@ -633,19 +656,21 @@ function Issue({
 							Salvar rascunho
 						</button>
 					)}
-					{step < 3 && (
+					{step < 5 && (
 						<button
 							className="btn"
 							disabled={
 								(step === 1 && !draft.takerId) ||
-								(step === 2 && (!draft.serviceProfileId || !draft.description))
+								(step === 2 && (!draft.serviceProfileId || !draft.description)) ||
+								(step === 3 && !/^\d{7}$/.test(draft.serviceMunicipalityIbge)) ||
+								(step === 4 && (!/^\d+\.\d{2}$/.test(draft.amount) || (draft.issTaxation === "taxable" && !draft.issRate)))
 							}
 							onClick={() => setStep(step + 1)}
 						>
 							Continuar
 						</button>
 					)}
-					{step === 3 && (
+					{step === 5 && (
 						<>
 							<button
 								className="btn secondary"
@@ -660,7 +685,7 @@ function Issue({
 								onClick={() => void saveDraft(true)}
 							>
 								{busy === "issue" && <LoaderCircle className="nfse-spinner" size={17} />}
-								{busy === "issue" ? "Enfileirando…" : "Emitir em simulação"}
+								{busy === "issue" ? "Enfileirando…" : simulation ? "Emitir em simulação" : production ? "Emitir NFS-e com valor fiscal" : "Emitir em homologação"}
 							</button> : <button className="btn" onClick={() => go("settings")}>Configurar certificado</button>}
 						</>
 					)}
@@ -694,6 +719,9 @@ function Registrations({
 							required
 						/>
 						<input name="taxRegime" placeholder="Regime tributário" required />
+					<label>Opção pelo Simples<select name="simpleNationalOption" defaultValue=""><option value="" disabled>Selecione conforme cadastro fiscal</option><option value="1">Não optante</option><option value="2">Optante — MEI</option><option value="3">Optante — demais</option></select></label>
+					<label>Regime de apuração no Simples<select name="simpleNationalTaxationRegime" defaultValue=""><option value="" disabled>Selecione</option><option value="1">Regime 1</option><option value="2">Regime 2</option><option value="3">Regime 3</option></select></label>
+					<input name="specialTaxRegime" placeholder="Código do regime especial" inputMode="numeric" maxLength={1} required />
 						<input
 							name="dpsSeries"
 							placeholder="Série DPS"
@@ -714,6 +742,8 @@ function Registrations({
 								placeholder="Código nacional"
 								required
 							/>
+							<input name="municipalCode" placeholder="Código municipal (quando exigido)" />
+							<input name="nbsCode" placeholder="NBS (quando aplicável)" />
 							<input
 								name="description"
 								placeholder="Descrição fiscal"
@@ -730,7 +760,7 @@ function Registrations({
 					{issuer ? (
 						<form action={(f) => submit("taker", f)}>
 							<input type="hidden" name="issuerId" value={issuer.id} />
-							<input name="taxId" placeholder="CNPJ do tomador" required />
+							<input name="taxId" placeholder="CNPJ do tomador" inputMode="numeric" autoComplete="off" required />
 							<input name="legalName" placeholder="Razão social" required />
 							<input name="email" type="email" placeholder="E-mail" required />
 							<button>Cadastrar tomador</button>
@@ -754,6 +784,8 @@ function CertificateSettings({
 	setMessage: (m: string) => void;
 	refresh: () => Promise<void>;
 }) {
+	const [uploading, setUploading] = useState(false),
+		[uploadFeedback, setUploadFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 	return (
 		<>
 			<PageTitle
@@ -778,17 +810,25 @@ function CertificateSettings({
 				)}
 				{issuer ? (
 					<form
-						action={async (f) => {
-							setMessage("Enviando certificado cifrado…");
-							const r = await fetch("/api/nfse/certificates", {
-									method: "POST",
-									body: f,
-								}),
-								b = await r.json();
-							setMessage(
-								r.ok ? "Certificado armazenado com criptografia." : b.error,
-							);
-							if (r.ok) await refresh();
+						onSubmit={async (event) => {
+							event.preventDefault();
+							if (uploading) return;
+							const form = event.currentTarget;
+							setUploading(true);
+							setUploadFeedback(null);
+							setMessage("");
+							try {
+								const r = await fetch("/api/nfse/certificates", { method: "POST", body: new FormData(form) }),
+									b = await r.json();
+								setUploadFeedback({ kind: r.ok ? "success" : "error", text: r.ok ? "Certificado armazenado com criptografia." : b.error || "Não foi possível adicionar o certificado." });
+								if (r.ok) { form.reset(); await refresh(); }
+								else {
+									const password = form.elements.namedItem("password") as HTMLInputElement | null;
+									if (password) password.value = "";
+								}
+							} catch {
+								setUploadFeedback({ kind: "error", text: "Falha de comunicação durante o envio. Tente novamente." });
+							} finally { setUploading(false); }
 						}}
 					>
 						<input type="hidden" name="issuerId" value={issuer.id} />
@@ -799,8 +839,10 @@ function CertificateSettings({
 							required
 							placeholder="Senha do certificado"
 						/>
-						<button>
-							{cert ? "Substituir certificado" : "Adicionar certificado"}
+						{uploadFeedback && <div className={`nfse-inline-feedback ${uploadFeedback.kind}`} role="alert">{uploadFeedback.text}</div>}
+						<button disabled={uploading} aria-busy={uploading}>
+							{uploading && <LoaderCircle className="nfse-spinner" size={17} />}
+							{uploading ? "Validando certificado…" : cert ? "Substituir certificado" : "Adicionar certificado"}
 						</button>
 					</form>
 				) : (

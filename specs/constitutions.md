@@ -465,3 +465,12 @@ specs/constitutions.md  Este documento
 - Resultados de sucesso, duplicidade e erro receberam estilos visuais distintos.
 - A melhoria vale para Importar Guias e Importar Parcelamentos.
 - Arquivos alterados: `components/real-app.tsx`, `app/real.css` e este documento.
+
+## 2026-11-09 — Integração fiscal local e adaptador de homologação
+
+- A interface NFS-e usa um contrato de workspace comum: Postgres local no adaptador `simulated` e Supabase/Postgres no adaptador `government_homologation`.
+- Simulação e homologação são identificadas separadamente. Simulação grava `simulation_reference` e `simulated_xml`; não preenche chave oficial nem produz `official_xml`.
+- O assistente de emissão possui seis etapas e persiste local, descontos e escolhas tributárias no rascunho/snapshot. A cobertura declarada é prestador PJ nacional com tomador PJ identificado; grupos ainda não validados ficam bloqueados.
+- As migrations 017–020 fecham escopo de emitente/RLS, vínculos compostos, troca transacional de certificado, campos DPS 1.01, lease/fencing e outbox fiscal manual.
+- O worker privado possui adaptadores explícitos. O governamental exige ambiente 2, DPS validada por XSD, assinatura, mTLS, evidência anterior ao POST, reconciliação sem repost e Storage privado. Produção continua bloqueada.
+- O fluxo local integrado foi executado com Postgres, certificado sintético, worker persistente, provedor `SIMULATED_LOCAL`, download autenticado e isolamento entre escritórios/emitentes.
