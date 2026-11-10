@@ -24,4 +24,7 @@ class CoreTest(unittest.TestCase):
  def test_supported_national_dps_validates_against_homologation_xsd(self):
   data=NationalDpsData(issuer_tax_id='19463142000113',issuer_municipality='2933307',taker_tax_id='42057096000174',taker_name='TOMADOR SINTETICO LTDA',competence='2026-11-08',amount=Decimal('1.00'),description='Servico sintetico de teste sem valor fiscal',series='1',number=1,national_code='171901',service_municipality='2933307',nbs_code='113022100')
   raw=build_national_dps(data,datetime(2026,11,8,12,0,tzinfo=timezone(timedelta(hours=-3))));root=Path(__file__).parents[3];validate_xsd(raw,str(root/'teste_nfse'/'esquemas_xsd'/'DPS_v1.01.xsd'))
+ def test_simple_national_approximate_tax_rate_uses_official_field(self):
+  data=NationalDpsData(issuer_tax_id='19463142000113',issuer_municipality='2933307',taker_tax_id='42057096000174',taker_name='TOMADOR SINTETICO LTDA',competence='2026-11-09',amount=Decimal('10.00'),description='Servicos de contabilidade',series='1',number=1,national_code='171901',service_municipality='2933307',nbs_code='113022100',approximate_simple_tax_rate=Decimal('6.00'),environment=1)
+  raw=build_national_dps(data,datetime(2026,11,9,12,0,tzinfo=timezone(timedelta(hours=-3))));root=Path(__file__).parents[3];validate_xsd(raw,str(root/'teste_nfse'/'esquemas_xsd'/'DPS_v1.01.xsd'));self.assertIn(b'<pTotTribSN>6.00</pTotTribSN>',raw);self.assertNotIn(b'<indTotTrib>',raw);self.assertIn(b'Id="DPS293330721946314200011300001000000000000001"',raw)
 if __name__=='__main__':unittest.main()

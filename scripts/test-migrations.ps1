@@ -9,7 +9,7 @@ function Compose([string[]]$arguments) {
 }
 Compose @('up','-d','--wait')
 function Sql([string]$database,[string]$file) {
-  Get-Content -Raw -LiteralPath $file | & docker compose -f (Join-Path $root 'docker-compose.migrations.yml') exec -T postgres psql -X -v ON_ERROR_STOP=1 -U postgres -d $database
+  Get-Content -Raw -LiteralPath $file | & docker compose -p socium-migrations -f (Join-Path $root 'docker-compose.migrations.yml') exec -T postgres psql -X -v ON_ERROR_STOP=1 -U postgres -d $database
   Assert-Exit "SQL $file em $database"
 }
 function Reset([string]$database) {

@@ -22,24 +22,28 @@ class NationalDpsData:
  competence:str;amount:Decimal;description:str;series:str;number:int
  national_code:str;service_municipality:str;nbs_code:str|None=None;municipal_code:str|None=None
  simple_option:str='3';simple_tax_regime:str='1';special_tax_regime:str='0'
- iss_taxation:str='1';iss_withholding:str='1';iss_rate:Decimal|None=None;environment:int=2
+ iss_taxation:str='1';iss_withholding:str='1';iss_rate:Decimal|None=None
+ approximate_simple_tax_rate:Decimal|None=None;environment:int=2
 def build_national_dps(data:NationalDpsData,issued_at:datetime)->bytes:
  if data.environment not in (1,2):raise ValueError('Ambiente fiscal inválido.')
  if not(data.issuer_tax_id.isdigit() and len(data.issuer_tax_id)==14 and data.taker_tax_id.isdigit() and len(data.taker_tax_id)==14):raise ValueError('CNPJ não suportado pelo cenário nacional PJ.')
  if not(data.issuer_municipality.isdigit() and len(data.issuer_municipality)==7 and data.service_municipality.isdigit() and len(data.service_municipality)==7):raise ValueError('Município IBGE inválido.')
  if data.amount<=0 or data.number<1:raise ValueError('Valor e número da DPS devem ser positivos.')
- q=lambda name:f'{{{NS}}}{name}';root=E.Element(q('DPS'),nsmap={None:NS},versao='1.01');identifier=f'DPS{data.issuer_municipality}{data.environment}{data.issuer_tax_id}{int(data.series):05d}{data.number:015d}';info=E.SubElement(root,q('infDPS'),Id=identifier)
+ q=lambda name:f'{{{NS}}}{name}';root=E.Element(q('DPS'),nsmap={None:NS},versao='1.01');identifier=f'DPS{data.issuer_municipality}2{data.issuer_tax_id}{int(data.series):05d}{data.number:015d}';info=E.SubElement(root,q('infDPS'),Id=identifier)
  def add(parent,name,value=None):
   node=E.SubElement(parent,q(name));node.text=None if value is None else str(value);return node
- for name,value in [('tpAmb',str(data.environment)),('dhEmi',issued_at.isoformat(timespec='seconds')),('verAplic','Socium_1.0'),('serie',data.series),('nDPS',data.number),('dCompet',data.competence),('tpEmit','1'),('finNFSe','0'),('cLocEmi',data.issuer_municipality)]:add(info,name,value)
+ for name,value in [('tpAmb',str(data.environment)),('dhEmi',issued_at.isoformat(timespec='seconds')),('verAplic','Socium_1.0'),('serie',data.series),('nDPS',data.number),('dCompet',data.competence),('tpEmit','1'),('cLocEmi',data.issuer_municipality)]:add(info,name,value)
  prest=add(info,'prest');add(prest,'CNPJ',data.issuer_tax_id);reg=add(prest,'regTrib');add(reg,'opSimpNac',data.simple_option);add(reg,'regApTribSN',data.simple_tax_regime);add(reg,'regEspTrib',data.special_tax_regime)
  taker=add(info,'toma');add(taker,'CNPJ',data.taker_tax_id);add(taker,'xNome',data.taker_name)
  service=add(info,'serv');add(add(service,'locPrest'),'cLocPrestacao',data.service_municipality);codes=add(service,'cServ');add(codes,'cTribNac',data.national_code)
  if data.municipal_code:add(codes,'cTribMun',data.municipal_code)
+ add(codes,'xDescServ',data.description)
  if data.nbs_code:add(codes,'cNBS',data.nbs_code)
- add(codes,'xDescServ',data.description);values=add(info,'valores');add(add(values,'vServPrest'),'vServ',format(data.amount,'.2f'));taxes=add(values,'trib');municipal=add(taxes,'tribMun');add(municipal,'tribISSQN',data.iss_taxation);add(municipal,'tpRetISSQN',data.iss_withholding)
+ values=add(info,'valores');add(add(values,'vServPrest'),'vServ',format(data.amount,'.2f'));taxes=add(values,'trib');municipal=add(taxes,'tribMun');add(municipal,'tribISSQN',data.iss_taxation);add(municipal,'tpRetISSQN',data.iss_withholding)
  if data.iss_rate is not None:add(municipal,'pAliq',format(data.iss_rate,'.2f'))
- add(add(taxes,'totTrib'),'indTotTrib','0')
+ total_taxes=add(taxes,'totTrib')
+ if data.approximate_simple_tax_rate is not None:add(total_taxes,'pTotTribSN',format(data.approximate_simple_tax_rate,'.2f'))
+ else:add(total_taxes,'indTotTrib','0')
  return E.tostring(root,encoding='UTF-8',xml_declaration=True)
 def validate_xsd(raw:bytes,xsd_path:str)->None:
  parser=E.XMLParser(resolve_entities=False,no_network=True);schema=E.XMLSchema(E.parse(xsd_path,parser));schema.assertValid(E.fromstring(raw,parser))

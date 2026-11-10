@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
 	CheckCircle2,
+	Download,
 	FilePlus2,
 	FileText,
 	Home,
@@ -189,7 +190,7 @@ export function NfseWorkspace() {
 				<div className="nfse-content">
 					<div className="nfse-banner">
 						<div>
-							<strong>{data.simulation ? "SIMULAÇÃO LOCAL - SEM VALOR FISCAL" : production ? "PRODUÇÃO GOVERNAMENTAL — EMISSÃO COM VALOR FISCAL" : "HOMOLOGAÇÃO GOVERNAMENTAL - SEM VALOR FISCAL"}</strong>
+							<strong>{data.simulation ? "SIMULAÇÃO LOCAL - SEM VALOR FISCAL" : production ? "PRODUÇÃO GOVERNAMENTAL - EMISSÃO COM VALOR FISCAL" : "HOMOLOGAÇÃO GOVERNAMENTAL - SEM VALOR FISCAL"}</strong>
 							<p>{data.simulation ? "Nenhuma chamada ao governo ou envio externo é realizado." : production ? "A emissão será transmitida à SEFIN Nacional e poderá gerar obrigação fiscal real." : "A integração usa somente a produção restrita configurada."}</p>
 						</div>
 						<ShieldCheck size={34} />
@@ -525,7 +526,7 @@ function Issue({
 							<option value="">Selecione um tomador</option>
 							{takers.map((x) => (
 								<option key={x.id} value={x.id}>
-									{x.legal_name} — {x.tax_id}
+									{x.legal_name} - {x.tax_id}
 								</option>
 							))}
 						</select>
@@ -600,14 +601,14 @@ function Issue({
 							<p><small>ISS</small><b>{draft.issTaxation} · {draft.issWithholding}</b><button className="nfse-edit-section" onClick={()=>setStep(4)}>Editar</button></p>
 							<p>
 								<small>Ambiente</small>
-								<b>{simulation ? "Simulação local" : production ? "Produção governamental — valor fiscal" : "Homologação governamental"}</b>
+								<b>{simulation ? "Simulação local" : production ? "Produção governamental, com valor fiscal" : "Homologação governamental"}</b>
 							</p>
 						</div>
 						<div className={`nfse-cert-state ${cert ? "ok" : "pending"}`}>
 							<ShieldCheck />
 							{cert
 								? `Certificado válido até ${new Date(cert.not_after || "").toLocaleDateString("pt-BR")}`
-								: "Certificado pendente — configure antes de emitir"}
+								: "Certificado pendente, configure antes de emitir"}
 						</div>
 					</>
 				)}
@@ -719,7 +720,7 @@ function Registrations({
 							required
 						/>
 						<input name="taxRegime" placeholder="Regime tributário" required />
-					<label>Opção pelo Simples<select name="simpleNationalOption" defaultValue=""><option value="" disabled>Selecione conforme cadastro fiscal</option><option value="1">Não optante</option><option value="2">Optante — MEI</option><option value="3">Optante — demais</option></select></label>
+					<label>Opção pelo Simples<select name="simpleNationalOption" defaultValue=""><option value="" disabled>Selecione conforme cadastro fiscal</option><option value="1">Não optante</option><option value="2">Optante - MEI</option><option value="3">Optante - demais</option></select></label>
 					<label>Regime de apuração no Simples<select name="simpleNationalTaxationRegime" defaultValue=""><option value="" disabled>Selecione</option><option value="1">Regime 1</option><option value="2">Regime 2</option><option value="3">Regime 3</option></select></label>
 					<input name="specialTaxRegime" placeholder="Código do regime especial" inputMode="numeric" maxLength={1} required />
 						<input
@@ -857,10 +858,13 @@ function InvoiceList({ invoices }: { invoices: Item[] }) {
 		<ul className="nfse-invoices">
 			{invoices.slice(0, 10).map((x) => (
 				<li key={x.id}>
-					<span>{x.description}</span>
-					<span className={`nfse-status ${x.status}`}>{x.status}</span>
+					<span className="nfse-invoice-description">{displayFiscalText(x.description)}</span>
+					<span className={`nfse-status ${x.status}`}>{statusLabel(x.status)}</span>
 					{x.official_key && (
-						<a href={`/api/nfse/invoices/${x.id}/xml`}>Baixar XML</a>
+						<div className="nfse-invoice-downloads">
+							<a className="nfse-artifact-link" href={`/api/nfse/invoices/${x.id}/xml`}><FileText size={15} /> XML</a>
+							<a className="nfse-artifact-link primary" href={`/api/nfse/invoices/${x.id}/pdf`}><Download size={15} /> PDF</a>
+						</div>
 					)}
 				</li>
 			))}
@@ -868,4 +872,26 @@ function InvoiceList({ invoices }: { invoices: Item[] }) {
 	) : (
 		<div className="nfse-empty">Nenhuma nota ou rascunho encontrado.</div>
 	);
+}
+
+function displayFiscalText(value?: string) {
+	return (value || "Sem descrição")
+		.replace(/Servi\?os/g, "Serviços")
+		.replace(/servi\?os/g, "serviços");
+}
+
+function statusLabel(status?: string) {
+	return ({
+		draft: "Rascunho",
+		queued: "Na fila",
+		claimed: "Processando",
+		signing: "Assinando",
+		transmitting: "Transmitindo",
+		reconciling: "Consultando",
+		authorized: "Autorizada",
+		rejected: "Rejeitada",
+		technical_failure: "Falha técnica",
+		unknown: "Aguardando confirmação",
+		persistence_pending: "Salvando resultado",
+	}[status || ""] || status || "Desconhecido");
 }

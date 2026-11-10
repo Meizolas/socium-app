@@ -16,7 +16,7 @@ begin
  if s is null then raise exception 'issuer_not_ready'; end if;
  insert into nfse_sequences(office_id,issuer_id,environment,series,next_number) values(n.office_id,n.issuer_id,n.environment,s,2)
  on conflict(issuer_id,environment,series) do update set next_number=nfse_sequences.next_number+1 returning next_number-1 into v;
- update nfse_invoices i set series=s,dps_number=v,dps_id='DPS'||(select municipality_ibge from nfse_issuers where id=i.issuer_id)||i.environment::text||(select tax_id from nfse_issuers where id=i.issuer_id)||lpad(s,5,'0')||lpad(v::text,15,'0'),status='queued',snapshot=jsonb_build_object(
+ update nfse_invoices i set series=s,dps_number=v,dps_id='DPS'||(select municipality_ibge from nfse_issuers where id=i.issuer_id)||'2'||(select tax_id from nfse_issuers where id=i.issuer_id)||lpad(s,5,'0')||lpad(v::text,15,'0'),status='queued',snapshot=jsonb_build_object(
   'version','national-dps-1.01','issuer',(select to_jsonb(x)-'created_at' from nfse_issuers x where x.id=i.issuer_id),
   'taker',(select to_jsonb(x)-'created_at' from nfse_takers x where x.id=i.taker_id),
   'service',(select to_jsonb(x)-'created_at' from nfse_service_profiles x where x.id=i.service_profile_id),

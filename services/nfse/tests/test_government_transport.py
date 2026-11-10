@@ -1,7 +1,8 @@
 import json,os,ssl,threading,unittest
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from nfse.core import classify
-from nfse.government_runtime import http
+from nfse.government_runtime import fiscal_now,http,iss_rate_for_dps,safe_response_details
 
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*args):pass
@@ -14,6 +15,16 @@ class Handler(BaseHTTPRequestHandler):
   body=b'%PDF-1.7\n% synthetic official transport test';self.send_response(200);self.send_header('Content-Type','application/pdf');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
 
 class GovernmentTransportTest(unittest.TestCase):
+ def test_fiscal_clock_uses_explicit_offset(self):
+  os.environ['NFSE_FISCAL_UTC_OFFSET']='-03:00'
+  self.assertEqual(fiscal_now().utcoffset().total_seconds(),-10800)
+ def test_simples_inside_regime_without_withholding_omits_iss_rate(self):
+  issuer={'simple_national_option':'3','simple_national_taxation_regime':'1'}
+  self.assertIsNone(iss_rate_for_dps(issuer,{'issWithholding':'not_withheld','issRate':'5.00'}))
+  self.assertEqual(iss_rate_for_dps(issuer,{'issWithholding':'withheld','issRate':'5.00'}),Decimal('5.00'))
+ def test_safe_rejection_details_are_bounded_and_structured(self):
+  body=b'{"erro":{"codigo":"E0001","descricao":"DPS invalida"},"segredo":"nao persistir"}'
+  self.assertEqual(safe_response_details(body),{'erro':{'codigo':'E0001','descricao':'DPS invalida'}})
  def setUp(self):
   self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler);self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start();os.environ['APP_ENV']='test';os.environ['NFSE_TEST_BASE_URL']=f'http://127.0.0.1:{self.server.server_port}'
  def tearDown(self):
