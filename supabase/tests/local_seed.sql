@@ -12,5 +12,7 @@ insert into profiles(id,office_id,name,role,onboarding_step) values
  ('30000000-0000-4000-8000-000000000003','33000000-0000-4000-8000-000000000003','Usuário Sem Módulo','operator','ready'),
  ('20000000-0000-4000-8000-000000000002','22000000-0000-4000-8000-000000000002','Admin Isolado Local','admin','ready') on conflict(id) do nothing;
 insert into office_modules(office_id,module,status,activated_at) values
- ('11000000-0000-4000-8000-000000000001','nfse','active',now()),('22000000-0000-4000-8000-000000000002','nfse','active',now())
+ ('11000000-0000-4000-8000-000000000001','documentos','active',now()),
+ ('11000000-0000-4000-8000-000000000001','nfse','active',now()),
+ ('22000000-0000-4000-8000-000000000002','nfse','active',now())
 on conflict(office_id,module) do update set status='active';

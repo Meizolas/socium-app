@@ -23,7 +23,7 @@ class NationalDpsData:
  national_code:str;service_municipality:str;nbs_code:str|None=None;municipal_code:str|None=None
  simple_option:str='3';simple_tax_regime:str='1';special_tax_regime:str='0'
  iss_taxation:str='1';iss_withholding:str='1';iss_rate:Decimal|None=None
- approximate_simple_tax_rate:Decimal|None=None;environment:int=2
+ approximate_simple_tax_rate:Decimal|None=None;ibs_cbs:dict|None=None;environment:int=2
 def build_national_dps(data:NationalDpsData,issued_at:datetime)->bytes:
  if data.environment not in (1,2):raise ValueError('Ambiente fiscal inválido.')
  if not(data.issuer_tax_id.isdigit() and len(data.issuer_tax_id)==14 and data.taker_tax_id.isdigit() and len(data.taker_tax_id)==14):raise ValueError('CNPJ não suportado pelo cenário nacional PJ.')
@@ -44,6 +44,8 @@ def build_national_dps(data:NationalDpsData,issued_at:datetime)->bytes:
  total_taxes=add(taxes,'totTrib')
  if data.approximate_simple_tax_rate is not None:add(total_taxes,'pTotTribSN',format(data.approximate_simple_tax_rate,'.2f'))
  else:add(total_taxes,'indTotTrib','0')
+ if data.ibs_cbs and data.ibs_cbs.get('enabled'):
+  rtc=add(info,'IBSCBS');add(rtc,'finNFSe',data.ibs_cbs['purpose']);add(rtc,'cIndOp',data.ibs_cbs['operationIndicator']);add(rtc,'indDest',data.ibs_cbs['destinationIndicator']);rtc_values=add(rtc,'valores');rtc_taxes=add(rtc_values,'trib');group=add(rtc_taxes,'gIBSCBS');add(group,'CST',data.ibs_cbs['taxSituation']);add(group,'cClassTrib',data.ibs_cbs['classification'])
  return E.tostring(root,encoding='UTF-8',xml_declaration=True)
 def validate_xsd(raw:bytes,xsd_path:str)->None:
  parser=E.XMLParser(resolve_entities=False,no_network=True);schema=E.XMLSchema(E.parse(xsd_path,parser));schema.assertValid(E.fromstring(raw,parser))

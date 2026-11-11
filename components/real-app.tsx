@@ -132,7 +132,7 @@ function Badge({ status }: { status: string }) {
   return <span className={"badge " + color}>{status}</span>;
 }
 
-export function RealApp() {
+export function RealApp({ onOpenModules }: { onOpenModules: () => void }) {
   const [page, setPage] = useState<Page>("Visão geral"),
     [editClientId, setEditClientId] = useState<string | null>(null),
     [clientSeed, setClientSeed] = useState<{ name: string; cnpj: string } | null>(
@@ -198,12 +198,7 @@ export function RealApp() {
         <img className="logo" src="/api/logo" alt="Socium Contábil" />
         <nav>
           {nav.map(([name, Icon]) => (
-            <button
-              key={name}
-              className={page === name ? "active" : ""}
-              onClick={() => setPage(name)}
-              title={collapsed ? name : undefined}
-            >
+            <button key={name} className={page === name ? "active" : ""} onClick={() => setPage(name)} title={collapsed ? name : undefined}>
               <Icon size={21} />
               <span>{name}</span>
             </button>
@@ -222,17 +217,18 @@ export function RealApp() {
           setPeriod={setPeriod}
           alerts={data.alerts}
           onViewNotifications={() => void viewNotifications()}
+          moduleName="Importar Guias"
+		  onOpenModules={onOpenModules}
         />
         <div className="content">
           {error && (
             <section className="card setup-error">
               <I.DatabaseZap />
               <div>
-                <h2>Banco ainda não inicializado</h2>
+                <h2>Serviço temporariamente indisponível</h2>
                 <p>{error}</p>
                 <small>
-                  Execute as migrations 001_initial.sql e 002_app_features.sql
-                  no SQL Editor do Supabase.
+                  Não foi possível carregar os dados. Tente novamente ou contate o suporte.
                 </small>
               </div>
               <Button onClick={load}>Tentar novamente</Button>
@@ -241,7 +237,7 @@ export function RealApp() {
           {!error && loading && (
             <div className="loading">
               <I.LoaderCircle className="spin" />
-              Carregando dados do Supabase…
+              Carregando dados…
             </div>
           )}
           {!error && !loading && page === "Visão geral" && (
@@ -287,7 +283,7 @@ export function RealApp() {
             <Shipments items={data.shipments.filter(item=>!period||item.competence===period)} />
           )}
           {!error && !loading && page === "Configurações" && (
-            <Settings officeId={data.officeId} />
+            <Settings />
           )}
         </div>
       </main>
@@ -302,6 +298,8 @@ function Header({
   setPeriod,
   alerts,
   onViewNotifications,
+  moduleName,
+  onOpenModules,
 }: {
   page: Page;
   setPage: (p: Page) => void;
@@ -309,13 +307,17 @@ function Header({
   setPeriod: (p: string) => void;
   alerts: Alert[];
   onViewNotifications: () => void;
+  moduleName: string;
+  onOpenModules: () => void;
 }) {
   const [open, setOpen] = useState("");
   const unread=alerts.filter(alert=>!alert.read_at).length;
   return (
     <header>
       <div>
-        <u>Socium</u>
+		<button className="breadcrumb-home" onClick={onOpenModules}>Socium</button>
+        <span>/</span>
+        <strong>{moduleName}</strong>
         <span>/</span>
         <b>{page}</b>
       </div>
@@ -402,6 +404,14 @@ function Header({
               <button onClick={() => setPage("Configurações")}>
                 <I.Settings />
                 Configurações
+              </button>
+			  <button onClick={onOpenModules}>
+				<I.LayoutGrid />
+				Trocar módulo
+			  </button>
+              <button className="profile-logout" onClick={async()=>{await fetch('/api/auth/logout',{method:'POST'});location.reload()}}>
+                <I.LogOut />
+                Sair da conta
               </button>
             </div>
           )}
@@ -515,7 +525,7 @@ function Overview({
     <>
       <Title
         title="Visão geral"
-        sub="Dados atualizados diretamente do Supabase."
+        sub="Acompanhe documentos, envios e pendências do escritório."
         actions={
           <Button onClick={() => go("Importar Guias")}>
             <I.CloudUpload />
@@ -680,7 +690,7 @@ function JobsTable({
                       type="button"
                       className="downloadbtn"
                       disabled={retrying === j.id}
-                      title="Processar novamente no n8n"
+                      title="Processar novamente"
                       aria-label={`Reprocessar ${j.file}`}
                       onClick={() => onRetry?.(j)}
                     >
@@ -771,10 +781,10 @@ function ImportPage({
       form.append("documentCategory",kind);
       try {
         setUploads(current=>({...current,[file.name]:{progress:0,status:"Preparando upload"}}));
-        const body=await new Promise<{id?:string}>((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open("POST","/api/documents");xhr.upload.onprogress=event=>{if(event.lengthComputable){const progress=Math.round(event.loaded/event.total*100);setUploads(current=>({...current,[file.name]:{progress,status:progress<100?"Enviando arquivo":"Armazenando no Supabase"}}))}};xhr.onload=()=>{let result;try{result=JSON.parse(xhr.responseText)}catch{result={error:"Resposta inválida do servidor."}}if(xhr.status>=200&&xhr.status<300)resolve(result);else{const failure=new Error(result.error||`Erro HTTP ${xhr.status}`) as Error&{status:number};failure.status=xhr.status;reject(failure)}};xhr.onerror=()=>reject(new Error("Falha de conexão com o servidor."));xhr.send(form)});
-        setUploads(current=>({...current,[file.name]:{progress:100,status:"Aguardando processamento do n8n"}}));
+        const body=await new Promise<{id?:string}>((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open("POST","/api/documents");xhr.upload.onprogress=event=>{if(event.lengthComputable){const progress=Math.round(event.loaded/event.total*100);setUploads(current=>({...current,[file.name]:{progress,status:progress<100?"Enviando arquivo":"Salvando arquivo"}}))}};xhr.onload=()=>{let result;try{result=JSON.parse(xhr.responseText)}catch{result={error:"Resposta inválida do servidor."}}if(xhr.status>=200&&xhr.status<300)resolve(result);else{const failure=new Error(result.error||`Falha no envio (${xhr.status})`) as Error&{status:number};failure.status=xhr.status;reject(failure)}};xhr.onerror=()=>reject(new Error("Falha de conexão com o servidor."));xhr.send(form)});
+        setUploads(current=>({...current,[file.name]:{progress:100,status:"Aguardando processamento"}}));
         if(body.id)uploadedIds.push(body.id);
-        output.push({text:`${file.name}: recebido e enviado ao n8n${body.id?` (documento ${body.id})`:""}`,kind:"success"});
+        output.push({text:`${file.name}: recebido com sucesso${body.id?` (documento ${body.id})`:""}`,kind:"success"});
       } catch(error) {
         const failure=error as Error&{status?:number},duplicate=failure.status===409;
         const detail=duplicate?"Este PDF já foi importado anteriormente. Use Reprocessar na tela de Processamentos ou exclua o registro anterior antes de importar novamente.":failure instanceof Error?failure.message:"Falha desconhecida";
@@ -783,7 +793,7 @@ function ImportPage({
         output.push({text:`${file.name}: ${detail}`,kind:duplicate?"duplicate":"error"});
       }
     }
-    if(duplicateCount)output.unshift({text:`${duplicateCount} arquivo(s) não foram enviados porque já haviam sido importados. Nenhum deles foi encaminhado novamente ao n8n.`,kind:"duplicate"});
+    if(duplicateCount)output.unshift({text:`${duplicateCount} arquivo(s) não foram enviados porque já haviam sido importados.`,kind:"duplicate"});
     setMessages(output);
     if(uploadedIds.length)await fetch("/api/documents/batch/finalize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({batchId,documentIds:uploadedIds})});
     setBusy(false);
@@ -794,7 +804,7 @@ function ImportPage({
       <Title
         title={kind === "PARCELAMENTO" ? "Importar Parcelamentos" : "Importar Guias"}
         sub={validPeriod
-          ? `Os ${kind === "PARCELAMENTO" ? "parcelamentos" : "arquivos"} serão armazenados no Supabase e processados na competência ${period}.`
+          ? `Os ${kind === "PARCELAMENTO" ? "parcelamentos" : "arquivos"} serão enviados e processados na competência ${period}.`
           : "Selecione uma competência no topo da página antes de importar os PDFs."}
       />
       <section
@@ -964,7 +974,7 @@ function Processings({
     <>
       <Title
         title="Processamentos"
-        sub="Fila real de documentos e estados retornados pelo n8n."
+        sub="Acompanhe o processamento dos documentos enviados."
         actions={
           <Button
             disabled={!selected.size || downloading}
@@ -1044,7 +1054,7 @@ function Clients({
     <>
       <Title
         title="Clientes"
-        sub="Cadastros armazenados no Supabase."
+        sub="Gerencie os clientes vinculados ao escritório."
         actions={
           <Button
             onClick={() => {
@@ -1301,7 +1311,7 @@ function Shipments({items}:{items:Shipment[]}){
       <div className="tablehead"><h3>Histórico de envios</h3><Badge status={`${items.length} registro(s)`}/></div>
       {items.length?<div className="tablewrap"><table><thead><tr><th>Arquivo</th><th>Tipo</th><th>Cliente</th><th>Canal</th><th>Status</th><th>Enviado/atualizado</th></tr></thead><tbody>
       {items.map(item=><tr key={item.id}><td><b>{item.file}</b></td><td><Badge status={item.type}/></td><td>{item.client}</td><td>{item.channel==='email'?'E-mail':'WhatsApp'}</td><td><Badge status={item.status}/>{item.errorMessage&&<small>{item.errorMessage}</small>}</td><td>{item.sentAt?formatDateTime(item.sentAt):"—"}</td></tr>)}
-      </tbody></table></div>:<EmptyLine text="Nenhum envio registrado no banco para esta competência."/>}
+      </tbody></table></div>:<EmptyLine text="Nenhum envio registrado para esta competência."/>}
     </section>
   </>
 }
@@ -1343,7 +1353,7 @@ function Alerts({
     </>
   );
 }
-function Settings({ officeId }: { officeId: string }) {
+function Settings() {
   const [evo, setEvo] = useState({
       baseUrl: "",
       instance: "",
@@ -1426,20 +1436,9 @@ function Settings({ officeId }: { officeId: string }) {
       />
       <div className="integration-grid">
         <section className="card settings">
-          <h3>Supabase</h3>
-          <p>
-            <span className="online" />
-            Conectado
-          </p>
-          <label>
-            Escritório
-            <input readOnly value={officeId} />
-          </label>
-          <h3>n8n</h3>
-          <p>
-            <span className="online" />
-            Extração e análise de documentos
-          </p>
+          <h3>Processamento de documentos</h3>
+          <p><span className="online" />Serviço operacional</p>
+          <p>Os arquivos importados são identificados, organizados e preparados automaticamente para envio.</p>
         </section>
         {false&&<section className="card settings">
           <h3>WhatsApp — Evolution API</h3>
@@ -1543,8 +1542,7 @@ function Settings({ officeId }: { officeId: string }) {
           <Button disabled={!configured.includes("gmail")} onClick={()=>void saveEmailTemplate()}><I.Save/>Salvar mensagens de e-mail</Button>
           {!gmailReady && (
             <small>
-              Configure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e APP_URL no
-              EasyPanel e implante novamente.
+              A integração de e-mail ainda não está disponível. Contate o suporte.
             </small>
           )}
         </section>

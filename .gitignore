@@ -18,3 +18,5 @@ storage/*
 !storage/.gitkeep
 .local-data/
 .next-stale/
+tsconfig.tsbuildinfo
+.artifacts

@@ -1166,7 +1166,7 @@ function Settings() {
         sub="Configure integrações, limites e preferências do escritório."
       />
       <section className="card settings">
-        <h3>Integração n8n</h3>
+        <h3>Automação de documentos</h3>
         <p>
           <span className="online" />
           Modo demonstração ativo

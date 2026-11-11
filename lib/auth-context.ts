@@ -52,7 +52,7 @@ export async function requireAppContext(
 	if (!token) throw new AuthError("Autenticação necessária.", 401);
 	const url = process.env.NEXT_PUBLIC_SUPABASE_URL,
 		anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-	if (!url || !anon) throw new Error("Supabase Auth não configurado.");
+	if (!url || !anon) throw new Error("Serviço de autenticação indisponível.");
 	const auth = createClient(url, anon, {
 		global: { headers: { Authorization: `Bearer ${token}` } },
 		auth: { persistSession: false, autoRefreshToken: false },
@@ -128,8 +128,8 @@ export function authError(error: unknown) {
 		(error.status === 401 || error.status === 403)
 	)
 		return Response.json({ error: error.message }, { status: error.status });
-	const message = error instanceof Error ? error.message : "Erro interno.";
-	return Response.json({ error: message }, { status: 500 });
+	console.error("Erro interno de autenticação", error);
+	return Response.json({ error: "Não foi possível concluir a solicitação." }, { status: 500 });
 }
 
 export function supabaseForSession(request: Request) {
@@ -137,7 +137,7 @@ export function supabaseForSession(request: Request) {
 		url = process.env.NEXT_PUBLIC_SUPABASE_URL,
 		anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 	if (!token) throw new AuthError("Autenticação necessária.", 401);
-	if (!url || !anon) throw new Error("Supabase Auth não configurado.");
+	if (!url || !anon) throw new Error("Serviço de autenticação indisponível.");
 	return createClient(url, anon, {
 		global: { headers: { Authorization: `Bearer ${token}` } },
 		auth: { persistSession: false, autoRefreshToken: false },

@@ -29,12 +29,12 @@ export async function POST(req:Request){
     const signed=await db.storage.from('das-documents').createSignedUrl(path,3600);
     if(signed.error)throw new Error(signed.error.message);
     if(!process.env.N8N_WEBHOOK_URL)throw new Error('N8N_WEBHOOK_URL não configurada.');
-    await db.from('processings').update({status:'Arquivo enviado ao n8n — extraindo dados',progress:20,started_at:new Date().toISOString()}).eq('id',processing.data.id);
+    await db.from('processings').update({status:'Arquivo recebido — extraindo dados',progress:20,started_at:new Date().toISOString()}).eq('id',processing.data.id);
     await db.from('documents').update({status:'Processando'}).eq('id',id);
     const response=await fetch(process.env.N8N_WEBHOOK_URL,{method:'POST',headers:{'Content-Type':'application/json','x-webhook-secret':process.env.N8N_WEBHOOK_SECRET||''},body:JSON.stringify({documentId:id,processingId:processing.data.id,originalName:file.name,fileUrl:signed.data.signedUrl,officeId,competence:form.get('competence'),documentCategory})});
     const responseText=(await response.text()).slice(0,2000);
     await db.from('attempts').insert({office_id:officeId,processing_id:processing.data.id,attempt:1,request:{documentId:id,originalName:file.name,competence:form.get('competence'),documentCategory},response:{status:response.status,body:responseText}});
-    if(!response.ok){await db.from('processings').update({status:'Erro ao iniciar no n8n',progress:100,error_message:`n8n respondeu ${response.status}: ${responseText.slice(0,300)}`,finished_at:new Date().toISOString()}).eq('id',processing.data.id);await db.from('documents').update({status:'Erro'}).eq('id',id);throw new Error(`Falha ao iniciar automação no n8n (${response.status}).`)}
+    if(!response.ok){console.error('Falha na automação de documentos',response.status,responseText.slice(0,300));await db.from('processings').update({status:'Falha ao iniciar processamento',progress:100,error_message:'Não foi possível iniciar o processamento automático.',finished_at:new Date().toISOString()}).eq('id',processing.data.id);await db.from('documents').update({status:'Erro'}).eq('id',id);throw new Error('Falha ao iniciar o processamento automático.')}
     return Response.json({id,processingId:processing.data.id,hash,status:'Processando'});
   }catch(error){
     const message=error instanceof Error?error.message:'Falha ao iniciar processamento.';

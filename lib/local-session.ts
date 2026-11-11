@@ -50,7 +50,13 @@ export async function localContext(request: Request): Promise<AppContext> {
 		role: "admin" | "operator";
 		modules: string[];
 	}>(
-		"select u.id user_id,p.office_id,p.role,coalesce(array_agg(om.module::text) filter(where om.status='active'),array[]::text[]) modules from auth.users u join profiles p on p.id=u.id left join office_modules om on om.office_id=p.office_id where u.id=$1 group by u.id,p.office_id,p.role",
+		`select u.id user_id,p.office_id,p.role,
+		 coalesce(array_agg(om.module::text order by om.module::text)
+		 filter(where om.status='active' and coalesce(pma.allowed,true)),array[]::text[]) modules
+		 from auth.users u join profiles p on p.id=u.id
+		 left join office_modules om on om.office_id=p.office_id
+		 left join profile_module_access pma on pma.profile_id=p.id and pma.module=om.module
+		 where u.id=$1 group by u.id,p.office_id,p.role`,
 		[parsed.userId],
 	);
 	if (!result.rows[0])

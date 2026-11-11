@@ -16,12 +16,12 @@ export async function POST(_:Request,{params}:{params:Promise<{id:string}>}){
     if(!process.env.N8N_WEBHOOK_URL)throw new Error('N8N_WEBHOOK_URL não configurada.');
     const attempts=await db.from('attempts').select('id',{count:'exact',head:true}).eq('processing_id',processing.data.id);
     const attempt=(attempts.count||0)+1;
-    await db.from('processings').update({status:'Arquivo enviado ao n8n — extraindo dados',progress:20,error_message:null,started_at:new Date().toISOString(),finished_at:null}).eq('id',processing.data.id);
+    await db.from('processings').update({status:'Arquivo recebido — extraindo dados',progress:20,error_message:null,started_at:new Date().toISOString(),finished_at:null}).eq('id',processing.data.id);
     await db.from('documents').update({status:'Processando'}).eq('id',id);
     const response=await fetch(process.env.N8N_WEBHOOK_URL,{method:'POST',headers:{'Content-Type':'application/json','x-webhook-secret':process.env.N8N_WEBHOOK_SECRET||''},body:JSON.stringify({documentId:id,processingId:processing.data.id,originalName:document.data.original_name,fileUrl:signed.data.signedUrl,officeId,competence:document.data.competence,documentCategory:document.data.document_category||'GUIA'})});
     const body=(await response.text()).slice(0,2000);
     await db.from('attempts').insert({office_id:officeId,processing_id:processing.data.id,attempt,request:{documentId:id,originalName:document.data.original_name,competence:document.data.competence,documentCategory:document.data.document_category||'GUIA'},response:{status:response.status,body}});
-    if(!response.ok){await db.from('processings').update({status:'Erro ao iniciar no n8n',progress:100,error_message:`n8n respondeu ${response.status}: ${body.slice(0,300)}`,finished_at:new Date().toISOString()}).eq('id',processing.data.id);await db.from('documents').update({status:'Erro'}).eq('id',id);return Response.json({error:`n8n respondeu ${response.status}`,details:body},{status:502})}
+    if(!response.ok){console.error('Falha ao reprocessar documento',response.status,body.slice(0,300));await db.from('processings').update({status:'Falha ao iniciar processamento',progress:100,error_message:'Não foi possível iniciar o processamento automático.',finished_at:new Date().toISOString()}).eq('id',processing.data.id);await db.from('documents').update({status:'Erro'}).eq('id',id);return Response.json({error:'Não foi possível iniciar o processamento automático.'},{status:502})}
     return Response.json({ok:true,status:response.status,response:body});
   }catch(error){
     const message=error instanceof Error?error.message:'Falha ao reprocessar.';
