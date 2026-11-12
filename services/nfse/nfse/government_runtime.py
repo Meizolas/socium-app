@@ -68,6 +68,24 @@ def safe_response_details(body:bytes)->dict:
  if len(json.dumps(details,ensure_ascii=False))>8000:return {'responseFormat':'structured_too_large','topLevelKeys':sorted(payload.keys())[:30]}
  return details
 
+def provider_error_message(details:dict)->str|None:
+ for key in ('mensagem','message','descricao'):
+  if isinstance(details.get(key),str):return details[key][:500]
+ for key in ('erro','erros','errors'):
+  candidate=details.get(key)
+  if isinstance(candidate,list):candidate=candidate[0] if candidate else None
+  if isinstance(candidate,dict):
+   code=candidate.get('codigo') or candidate.get('Codigo');description=candidate.get('descricao') or candidate.get('Descricao') or candidate.get('mensagem') or candidate.get('message')
+   if description:return (f'{code} — ' if code else '')+str(description)[:450]
+  if isinstance(candidate,str):return candidate[:500]
+ return None
+
+def cancellation_author_tax_id(invoice:dict)->str:
+ # The representative certificate signs the event, but the fiscal author of
+ # event 101101 remains the issuer whose NFS-e is being cancelled.
+ issuer=(invoice.get('snapshot') or {}).get('issuer') or {}
+ return ''.join(x for x in str(issuer.get('tax_id') or '') if x.isdigit())
+
 def decrypt_envelope(raw:bytes,aad:str)->dict:
  version,iv,tag,data=raw.decode().split('.');
  if version!='v1':raise RuntimeError('Versão de custódia não suportada.')
@@ -155,7 +173,7 @@ class GovernmentRuntime:
  def cancel(self,job:dict,invoice:dict)->None:
   cancellation=invoice['cancellation'];snap=invoice['snapshot'];issuer=snap['issuer'];temp,context,key,cert=self.certificate_context(invoice)
   try:
-   author_tax_id=''.join(x for x in str(invoice.get('signing_subject_tax_id') or issuer['tax_id']) if x.isdigit());unsigned=build_cancellation_request(author_tax_id,invoice['official_key'],str(cancellation['reason_code']),cancellation['reason'],self.environment,fiscal_now());signed=sign_event_request(unsigned,key,cert,self.environment);event_xsd=os.getenv('NFSE_EVENT_XSD',str(Path(self.xsd).with_name('pedRegEvento_v1.01.xsd')));validate_xsd(signed,event_xsd);digest=hashlib.sha256(signed).hexdigest();path=f"{invoice['office_id']}/{invoice['id']}/signed-cancellation-{digest}.xml";self.storage.write_document(path,signed)
+   author_tax_id=cancellation_author_tax_id(invoice);unsigned=build_cancellation_request(author_tax_id,invoice['official_key'],str(cancellation['reason_code']),cancellation['reason'],self.environment,fiscal_now());signed=sign_event_request(unsigned,key,cert,self.environment);event_xsd=os.getenv('NFSE_EVENT_XSD',str(Path(self.xsd).with_name('pedRegEvento_v1.01.xsd')));validate_xsd(signed,event_xsd);digest=hashlib.sha256(signed).hexdigest();path=f"{invoice['office_id']}/{invoice['id']}/signed-cancellation-{digest}.xml";self.storage.write_document(path,signed)
    try:
     if self.rpc:self.rpc.call('mark_nfse_cancellation_post_started',{'p_job':job['id'],'p_worker':self.worker,'p_fence':job['fence_token'],'p_request_hash':digest,'p_storage_path':path,'p_size':len(signed)})
     else:
@@ -174,8 +192,8 @@ class GovernmentRuntime:
  def finish_cancellation(self,job:dict,result:str,body:bytes,http_status:int|None,event_xml:bytes|None=None)->None:
   response_hash=hashlib.sha256(body).hexdigest() if body else None;event_path=None;details=safe_response_details(body);error_message=None
   if result!='authorized':
-   candidate=details.get('mensagem') or details.get('message') or details.get('descricao') or details.get('erro')
-   if isinstance(candidate,str):error_message=candidate[:500]
+   candidate=provider_error_message(details)
+   if candidate:error_message=candidate
    elif result=='rejected':error_message='O ambiente nacional rejeitou o pedido de cancelamento.'
    elif result=='technical_failure':error_message='Houve uma falha de comunicação ao cancelar. A nota permanece autorizada.'
    else:error_message='Não foi possível confirmar o cancelamento. A nota permanece autorizada.'

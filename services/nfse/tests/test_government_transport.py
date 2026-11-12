@@ -2,7 +2,7 @@ import json,os,ssl,threading,unittest
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from nfse.core import classify
-from nfse.government_runtime import fiscal_now,http,iss_rate_for_dps,safe_response_details
+from nfse.government_runtime import fiscal_now,http,iss_rate_for_dps,safe_response_details,provider_error_message,cancellation_author_tax_id
 
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*args):pass
@@ -25,6 +25,10 @@ class GovernmentTransportTest(unittest.TestCase):
  def test_safe_rejection_details_are_bounded_and_structured(self):
   body=b'{"erro":{"codigo":"E0001","descricao":"DPS invalida"},"segredo":"nao persistir"}'
   self.assertEqual(safe_response_details(body),{'erro':{'codigo':'E0001','descricao':'DPS invalida'}})
+  self.assertEqual(provider_error_message({'erro':[{'codigo':'E0813','descricao':'Autor divergente'}]}),'E0813 — Autor divergente')
+ def test_representative_signs_but_issuer_remains_event_author(self):
+  invoice={'signing_subject_tax_id':'19463142000113','snapshot':{'issuer':{'tax_id':'25101960000179'}}}
+  self.assertEqual(cancellation_author_tax_id(invoice),'25101960000179')
  def setUp(self):
   self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler);self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start();os.environ['APP_ENV']='test';os.environ['NFSE_TEST_BASE_URL']=f'http://127.0.0.1:{self.server.server_port}'
  def tearDown(self):
