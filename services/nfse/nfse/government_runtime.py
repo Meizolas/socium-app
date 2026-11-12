@@ -7,7 +7,7 @@ import psycopg
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.serialization import pkcs12
-from .core import NationalDpsData,build_national_dps,validate_xsd,sign_national_dps,transmission_body,classify,SEFIN_HOMOLOGATION,SEFIN_PRODUCTION,DANFSE_HOMOLOGATION,DANFSE_PRODUCTION
+from .core import NationalDpsData,build_national_dps,validate_xsd,sign_national_dps,transmission_body,classify,build_cancellation_request,sign_event_request,event_transmission_body,SEFIN_HOMOLOGATION,SEFIN_PRODUCTION,DANFSE_HOMOLOGATION,DANFSE_PRODUCTION
 from .danfse_v2 import LAYOUT_VERSION,render_danfse_v2
 
 def required(name:str)->str:
@@ -108,11 +108,16 @@ class GovernmentRuntime:
    with psycopg.connect(self.db,row_factory=psycopg.rows.dict_row) as conn:
     if job['kind']=='issue':
      record=conn.execute("select i.*,c.custody_reference,c.issuer_id custody_aad_issuer_id,c.id signing_certificate_id from nfse_invoices i join profiles p on p.id=i.created_by and p.office_id=i.office_id and p.role in ('admin','operator','client') join office_modules m on m.office_id=i.office_id and m.module='nfse' and m.status='active' join nfse_certificates c on c.id=active_nfse_certificate(i) where i.id=%s and can_access_nfse_issuer_for_profile(p.id,i.issuer_id)",(job['invoice_id'],)).fetchone()
+    elif job['kind']=='cancel':
+     record=conn.execute("select i.*,to_jsonb(x) cancellation,c.custody_reference,c.issuer_id custody_aad_issuer_id,c.id signing_certificate_id,c.subject_tax_id signing_subject_tax_id from nfse_invoices i join nfse_cancellations x on x.invoice_id=i.id and x.status in ('queued','processing') join nfse_certificates c on c.id=active_nfse_cancellation_certificate(i) where i.id=%s and i.status='authorized'",(job['invoice_id'],)).fetchone()
     else:
      record=conn.execute("select i.*,c.custody_reference,c.issuer_id custody_aad_issuer_id,c.id signing_certificate_id from nfse_invoices i join nfse_certificates c on c.id=active_nfse_certificate(i) where i.id=%s and i.status in ('unknown','reconciling','persistence_pending')",(job['invoice_id'],)).fetchone()
   if not record:
-   self.finish(job,'cancelled',b'',None);return
+   if job['kind']=='cancel':self.finish_cancellation(job,'technical_failure',b'',None)
+   else:self.finish(job,'cancelled',b'',None)
+   return
   if job['kind']=='issue':self.issue(job,record)
+  elif job['kind']=='cancel':self.cancel(job,record)
   else:self.reconcile(job,record)
  def certificate_context(self,invoice:dict):
   custody_issuer=invoice.get('custody_aad_issuer_id') or invoice['issuer_id'];aad=f"{invoice['office_id']}:{custody_issuer}:v1";secret=decrypt_envelope(self.storage.read_custody(invoice['custody_reference']),aad);key,cert,chain=pkcs12.load_key_and_certificates(base64.b64decode(secret['pfx']),secret['password'].encode());
@@ -127,7 +132,10 @@ class GovernmentRuntime:
   dps=NationalDpsData(issuer_tax_id=issuer['tax_id'],issuer_municipality=issuer['municipality_ibge'],taker_tax_id=taker['tax_id'],taker_name=taker['legal_name'],competence=str(data['competence']),amount=Decimal(str(data['amount'])),description=data['description'],series=str(data['series']),number=int(data['number']),national_code=service['national_code'],municipal_code=service.get('municipal_code'),nbs_code=service.get('nbs_code'),service_municipality=operation['serviceMunicipalityIbge'],simple_option=issuer['simple_national_option'],simple_tax_regime=issuer['simple_national_taxation_regime'],special_tax_regime=issuer['special_tax_regime'],iss_taxation='1',iss_withholding='2' if tax.get('issWithholding')=='withheld' else '1',iss_rate=iss_rate_for_dps(issuer,tax),approximate_simple_tax_rate=Decimal(str(approximate_rate)) if approximate_rate is not None else None,ibs_cbs=tax.get('ibsCbs'),environment=self.environment)
   temp,context,key,cert=self.certificate_context(invoice)
   try:
-   unsigned=build_national_dps(dps,fiscal_now());signed=sign_national_dps(unsigned,key,cert,self.environment);validate_xsd(signed,self.xsd);digest=hashlib.sha256(signed).hexdigest();path=f"{invoice['office_id']}/{invoice['id']}/signed-{digest}.xml";self.storage.write_document(path,signed)
+   try:unsigned=build_national_dps(dps,fiscal_now());signed=sign_national_dps(unsigned,key,cert,self.environment);validate_xsd(signed,self.xsd)
+   except Exception as error:
+    self.finish(job,'technical_failure',json.dumps({'error':'Não foi possível gerar o XML fiscal com os dados informados.','stage':'xml_generation','type':type(error).__name__}).encode(),None);return
+   digest=hashlib.sha256(signed).hexdigest();path=f"{invoice['office_id']}/{invoice['id']}/signed-{digest}.xml";self.storage.write_document(path,signed)
    try:
     if self.rpc:self.rpc.call('mark_nfse_post_started',{'p_job':job['id'],'p_worker':self.worker,'p_fence':job['fence_token'],'p_request_hash':digest,'p_storage_path':path,'p_size':len(signed)})
     else:
@@ -144,6 +152,43 @@ class GovernmentRuntime:
    except TimeoutError:return
    result=classify(status,body);self.finish(job,result if result!='unknown' else 'reconciling',body,status,context)
   finally:temp.cleanup()
+ def cancel(self,job:dict,invoice:dict)->None:
+  cancellation=invoice['cancellation'];snap=invoice['snapshot'];issuer=snap['issuer'];temp,context,key,cert=self.certificate_context(invoice)
+  try:
+   author_tax_id=''.join(x for x in str(invoice.get('signing_subject_tax_id') or issuer['tax_id']) if x.isdigit());unsigned=build_cancellation_request(author_tax_id,invoice['official_key'],str(cancellation['reason_code']),cancellation['reason'],self.environment,fiscal_now());signed=sign_event_request(unsigned,key,cert,self.environment);event_xsd=os.getenv('NFSE_EVENT_XSD',str(Path(self.xsd).with_name('pedRegEvento_v1.01.xsd')));validate_xsd(signed,event_xsd);digest=hashlib.sha256(signed).hexdigest();path=f"{invoice['office_id']}/{invoice['id']}/signed-cancellation-{digest}.xml";self.storage.write_document(path,signed)
+   try:
+    if self.rpc:self.rpc.call('mark_nfse_cancellation_post_started',{'p_job':job['id'],'p_worker':self.worker,'p_fence':job['fence_token'],'p_request_hash':digest,'p_storage_path':path,'p_size':len(signed)})
+    else:
+     with psycopg.connect(self.db) as conn:conn.execute('select mark_nfse_cancellation_post_started(%s,%s,%s,%s,%s,%s)',(job['id'],self.worker,job['fence_token'],digest,path,len(signed)));conn.commit()
+   except Exception:self.storage.delete_document(path);raise
+   try:status,body=http(context,'POST','/nfse/'+urllib.parse.quote(invoice['official_key'],safe='')+'/eventos',event_transmission_body(signed))
+   except TimeoutError:self.finish_cancellation(job,'unknown',b'',None);return
+   result='technical_failure' if status>=500 else 'unknown';event_xml=None
+   try:
+    payload=json.loads(body);packed=payload.get('eventoXmlGZipB64');errors=payload.get('erros') or payload.get('errors') or []
+    if status in (200,201) and packed:event_xml=gzip.decompress(base64.b64decode(packed,validate=True));result='authorized'
+    elif errors or status in (400,409,422):result='rejected'
+   except Exception:pass
+   self.finish_cancellation(job,result,body,status,event_xml)
+  finally:temp.cleanup()
+ def finish_cancellation(self,job:dict,result:str,body:bytes,http_status:int|None,event_xml:bytes|None=None)->None:
+  response_hash=hashlib.sha256(body).hexdigest() if body else None;event_path=None;details=safe_response_details(body);error_message=None
+  if result!='authorized':
+   candidate=details.get('mensagem') or details.get('message') or details.get('descricao') or details.get('erro')
+   if isinstance(candidate,str):error_message=candidate[:500]
+   elif result=='rejected':error_message='O ambiente nacional rejeitou o pedido de cancelamento.'
+   elif result=='technical_failure':error_message='Houve uma falha de comunicação ao cancelar. A nota permanece autorizada.'
+   else:error_message='Não foi possível confirmar o cancelamento. A nota permanece autorizada.'
+  if event_xml:
+   event_path=f"{job['office_id']}/{job['invoice_id']}/cancellation-{hashlib.sha256(event_xml).hexdigest()}.xml";self.storage.write_document(event_path,event_xml)
+  payload={'p_job':job['id'],'p_worker':self.worker,'p_fence':job['fence_token'],'p_result':result,'p_response_hash':response_hash,'p_http_status':http_status,'p_safe_details':{'provider':self.provider,**details},'p_error':error_message,'p_event_path':event_path,'p_event_hash':hashlib.sha256(event_xml).hexdigest() if event_xml else None,'p_event_size':len(event_xml) if event_xml else None}
+  if self.rpc:
+   try:self.rpc.call('nfse_worker_finish_cancellation',payload)
+   except Exception:
+    if event_path:self.storage.delete_document(event_path)
+    raise
+  else:
+   with psycopg.connect(self.db) as conn:conn.execute('select nfse_worker_finish_cancellation(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)',tuple(payload.values()));conn.commit()
  def finish(self,job:dict,result:str,body:bytes,http_status:int|None,context:ssl.SSLContext|None=None)->None:
   response_hash=hashlib.sha256(body).hexdigest() if body else None;official_key=None;official_xml=None;official_pdf=None
   if result=='authorized':

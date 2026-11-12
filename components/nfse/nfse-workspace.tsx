@@ -34,6 +34,7 @@ import {
 	LayoutGrid,
 	Handshake,
 	LogIn,
+	Ban,
 } from "lucide-react";
 type Area = "overview" | "issue" | "registrations" | "representations" | "settings" | "setup";
 type Item = {
@@ -59,6 +60,17 @@ type Item = {
 	municipality_ibge?: string;
 	service_municipality_ibge?: string;
 	operation_indicator?: string;
+	cancellation_status?: string;
+	cancelled_at?: string;
+	cancellation_reason?: string;
+	cancellation_error?: string;
+	certificate_id?: string;
+	authorization_type?: string;
+	allow_client_issuance?: boolean;
+	allow_cancellation?: boolean;
+	valid_until?: string;
+	nfse_certificates?: Item | Item[];
+	signing_mode?: "own" | "representation";
 	tax_situation?: string;
 	taxation?: Record<string, unknown>;
 	address?: Record<string, unknown>;
@@ -73,6 +85,7 @@ type Data = {
 	invoices: Item[];
 	certificates: Item[];
 	signingReadyIssuerIds?: string[];
+	representations?: Item[];
 };
 type Draft = {
 	takerId: string;
@@ -146,6 +159,8 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 		[busy, setBusy] = useState(""),
 		[area, setArea] = useState<Area>("overview"),
 		[issuerId, setIssuerId] = useState(""),
+		[representingIssuerId,setRepresentingIssuerId]=useState(""),
+		[representationNotice,setRepresentationNotice]=useState(true),
 		[step, setStep] = useState(1),
 		[draft, setDraft] = useState(emptyDraft),
 		[resultId, setResultId] = useState(""),
@@ -155,7 +170,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 		try {
 			const r = await fetch("/api/nfse/workspace", { cache: "no-store" }), b = await r.json();
 			if (!r.ok) { setMessage(b.error || "Não foi possível atualizar os dados."); return false; }
-			setData(b); setIssuerId((current) => current || b.issuers[0]?.id || "");
+			setData(b); setIssuerId((current) => current || b.certificates.find((x:Item)=>x.status==="active")?.issuer_id || b.issuers[0]?.id || "");
 			if (first.current) { first.current = false; if (!b.issuers.length || !b.services.length || (!b.certificates.some((x: Item) => x.status === "active") && !b.signingReadyIssuerIds?.length)) setArea("setup"); }
 			return true;
 		} catch { setMessage("Não foi possível atualizar os dados agora. Tente novamente."); return false; }
@@ -179,7 +194,8 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 		if (busy) return false;
 		setBusy(`registration:${kind}`); setMessage("");
 		const result = await post({ action: kind, ...Object.fromEntries(values) });
-		if (result.ok) setMessage(kind === "taker" ? "Tomador salvo com sucesso." : kind === "service" ? "Serviço salvo com sucesso." : "Emitente salvo com sucesso.");
+		if (result.ok&&kind==="issuer"&&result.body.id){setRepresentingIssuerId("");setIssuerId(result.body.id);setArea("settings");setMessage("Empresa adicionada. Cadastre agora o certificado A1 para concluir.")}
+		else if (result.ok) setMessage(kind === "taker" ? "Tomador salvo com sucesso." : kind === "service" ? "Serviço salvo com sucesso." : "Emitente salvo com sucesso.");
 		setBusy("");
 		return result.ok;
 	}
@@ -191,7 +207,9 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 				</section>
 			</main>
 		);
-	const issuer = data.issuers.find((x) => x.id === issuerId) || data.issuers[0],
+	const ownIssuers=data.role==="client"?data.issuers:data.issuers.filter(item=>data.certificates.some(cert=>cert.issuer_id===item.id&&cert.status==="active")),
+		baseIssuer=data.issuers.find(x=>x.id===issuerId)||ownIssuers[0]||data.issuers[0],
+		issuer=data.issuers.find(x=>x.id===representingIssuerId)||baseIssuer,
 		services = data.services.filter((x) => x.issuer_id === issuer?.id),
 		takers = data.takers.filter((x) => x.issuer_id === issuer?.id),
 		cert = data.certificates.find(
@@ -200,11 +218,15 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 		invoices = data.invoices.filter(
 			(x) => !issuer || x.issuer_id === issuer.id,
 		),
-		signingReady = Boolean(cert || (issuer && data.signingReadyIssuerIds?.includes(issuer.id))),
-		effectiveCert = cert || (signingReady ? { id: "representation", status: "active", subject_tax_id: "Representante autorizado" } : undefined),
+		representation = data.representations?.find((x)=>x.issuer_id===issuer?.id),
+		representationCertificate = representation ? (Array.isArray(representation.nfse_certificates) ? representation.nfse_certificates[0] : representation.nfse_certificates) : undefined,
+		signingReady = Boolean(cert || representation),
+		effectiveCert = cert ? {...cert,signing_mode:"own" as const} : representation ? { id: representation.certificate_id || "representation", status: "active", subject_tax_id: representationCertificate?.subject_tax_id || "Representante autorizado",not_after:representationCertificate?.not_after,signing_mode:"representation" as const } : undefined,
 		ready = Boolean(issuer && services.length && signingReady),
 		simulation = data.simulation,
 		production = data.environment === "government_production";
+	function enterRepresentation(target:Item){setRepresentingIssuerId(target.id);setRepresentationNotice(true);setArea("overview");setDraft(emptyDraft);setStep(1)}
+	function leaveRepresentation(){setRepresentingIssuerId("");setRepresentationNotice(true);setArea("overview");setDraft(emptyDraft);setStep(1)}
 	async function saveDraft(enqueue = false) {
 		if (busy) return;
 		if (!issuer || !draft.takerId || !draft.serviceProfileId)
@@ -241,20 +263,24 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 	}
 	return (
 		<div className={`app nfse-app ${collapsed ? "sidebar-collapsed" : ""}`}>
-			<Sidebar area={area} go={setArea} collapsed={collapsed} setCollapsed={setCollapsed} role={data.role} />
+			<Sidebar area={area} go={setArea} collapsed={collapsed} setCollapsed={setCollapsed} role={data.role} canRepresent={data.role==="admin"&&ownIssuers.length>0} />
 			<main>
 				<Topbar
 					area={area}
 					go={setArea}
 					issuer={issuer}
-					issuers={data.issuers}
+					issuers={ownIssuers}
 					value={issuerId}
-					onChange={setIssuerId}
+					onChange={(value)=>{setIssuerId(value);setRepresentingIssuerId("")}}
+					representing={Boolean(representingIssuerId)}
+					onStopRepresenting={leaveRepresentation}
+					onAddCompany={()=>setArea("registrations")}
 					simulation={data.simulation}
 					production={production}
 					onOpenModules={onOpenModules}
 				/>
 				<div className="nfse-content">
+					{representingIssuerId&&representationNotice&&issuer&&<div className="nfse-representing-alert" role="status"><Handshake size={20}/><span>Você está representando <b>{formatTaxId(issuer.tax_id)} - {issuer.legal_name}</b></span><button type="button" aria-label="Ocultar aviso" onClick={()=>setRepresentationNotice(false)}><X size={19}/></button></div>}
 					{!production && <div className="nfse-banner">
 						<div>
 							<strong>{data.simulation ? "SIMULAÇÃO LOCAL - SEM VALOR FISCAL" : production ? "PRODUÇÃO GOVERNAMENTAL - EMISSÃO COM VALOR FISCAL" : "HOMOLOGAÇÃO GOVERNAMENTAL - SEM VALOR FISCAL"}</strong>
@@ -264,7 +290,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 					</div>}
 					{message && <div className={`nfse-message ${busy ? "busy" : ""}`} role="status" aria-live="polite">{busy && <LoaderCircle className="nfse-spinner" size={18} />}<span>{message}</span></div>}
 					{area === "setup" && (
-						<Setup data={data} issuer={issuer} cert={cert} go={setArea} />
+						<Setup data={data} issuer={issuer} cert={cert} representation={representation} go={setArea} />
 					)}{" "}
 					{area === "overview" && (
 						<Overview
@@ -272,6 +298,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 							ready={ready}
 							go={setArea}
 							refresh={load}
+							canCancel={data.role === "admin" || data.role === "operator"}
 						/>
 					)}{" "}
 					{area === "issue" && (
@@ -297,12 +324,15 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 						<Registrations issuer={issuer} submit={form} busy={busy.startsWith("registration:")} />
 					)}{" "}
 					{area === "representations" && (
-						<RepresentationWorkspace data={data} onIssuerChange={setIssuerId} refresh={load} />
+						<RepresentationWorkspace data={data} representativeIssuer={baseIssuer} onRepresent={enterRepresentation} refresh={load} />
 					)}{" "}
 					{area === "settings" && (
 						<CertificateSettingsSimple
 							issuer={issuer}
 							cert={cert}
+							representation={representation}
+							representativeCert={representationCertificate}
+							go={setArea}
 							setMessage={setMessage}
 							refresh={load}
 						/>
@@ -312,7 +342,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 		</div>
 	);
 }
-function Sidebar({ area, go, collapsed, setCollapsed, role }: { area: Area; go: (a: Area) => void; collapsed: boolean; setCollapsed: (value: boolean) => void; role?: Data["role"] }) {
+function Sidebar({ area, go, collapsed, setCollapsed, role, canRepresent }: { area: Area; go: (a: Area) => void; collapsed: boolean; setCollapsed: (value: boolean) => void; role?: Data["role"];canRepresent:boolean }) {
 	const item = (key: Area, label: string, Icon: typeof Home) => (
 		<button className={area === key ? "active" : ""} onClick={() => go(key)} title={collapsed ? label : undefined}>
 			<Icon size={20} />
@@ -327,7 +357,7 @@ function Sidebar({ area, go, collapsed, setCollapsed, role }: { area: Area; go: 
 				{item("overview", "Visão geral", Home)}
 				{item("issue", "Emitir NFS-e", FilePlus2)}
 				{item("registrations", "Cadastros fiscais", Users)}
-				{role === "admin" && item("representations", "Representação", Handshake)}
+				{role === "admin" && canRepresent && item("representations", "Representação", Handshake)}
 				{item("settings", "Configurações", Settings)}
 			</nav>
 			<button className="collapse" onClick={() => setCollapsed(!collapsed)}>
@@ -344,6 +374,9 @@ function Topbar({
 	issuers,
 	value,
 	onChange,
+	representing,
+	onStopRepresenting,
+	onAddCompany,
 	simulation,
 	production,
 	onOpenModules,
@@ -354,6 +387,9 @@ function Topbar({
 	issuers: Item[];
 	value: string;
 	onChange: (v: string) => void;
+	representing:boolean;
+	onStopRepresenting:()=>void;
+	onAddCompany:()=>void;
 	simulation: boolean;
 	production: boolean;
 	onOpenModules: () => void;
@@ -367,17 +403,18 @@ function Topbar({
 				<button className="breadcrumb-home" type="button" onClick={onOpenModules}>Helians</button><span>/</span><strong>Emitir NFS-e</strong><span>/</span><b>{labels[area]}</b>
 			</div>
 			<div className="headright">
-				<label className="nfse-issuer-select">
+				{representing?<div className="nfse-represented-context"><small>Representando</small><b>{issuer?.legal_name}</b><button type="button" onClick={onStopRepresenting}>Encerrar</button></div>:<label className="nfse-issuer-select">
 					<span>Empresa</span>
 					<select value={value} onChange={(e) => onChange(e.target.value)}>
-						<option value="">Selecione</option>
+						<option value="">Selecione uma empresa com certificado</option>
 						{issuers.map((x) => (
 							<option key={x.id} value={x.id}>
 								{x.legal_name}
 							</option>
 						))}
 					</select>
-				</label>
+					<button type="button" className="nfse-add-company" onClick={onAddCompany}>+ Adicionar empresa</button>
+				</label>}
 				{!production && <span className="badge blue">{simulation ? "Simulação local" : "Homologação governamental"}</span>}
 				<button className="iconbtn nfse-alert-button" type="button" aria-label="Notificações"><Bell size={21} /></button>
 				<div className="headmenu">
@@ -418,13 +455,16 @@ function Setup({
 	data,
 	issuer,
 	cert,
+	representation,
 	go,
 }: {
 	data: Data;
 	issuer?: Item;
 	cert?: Item;
+	representation?: Item;
 	go: (a: Area) => void;
 }) {
+	const signingReady=Boolean(cert||representation);
 	const steps = [
 		{
 			done: Boolean(issuer),
@@ -437,12 +477,12 @@ function Setup({
 			area: "registrations" as Area,
 		},
 		{
-			done: Boolean(cert),
-			title: "Adicionar certificado A1",
-			area: "settings" as Area,
+			done: signingReady,
+			title: representation ? "Representação ativa" : cert ? "Certificado A1 ativo" : "Definir certificado ou representação",
+			area: representation ? "representations" as Area : "settings" as Area,
 		},
 		{
-			done: Boolean(issuer && cert),
+			done: Boolean(issuer && signingReady),
 			title: "Revisar pendências e concluir",
 			area: "overview" as Area,
 		},
@@ -478,11 +518,13 @@ function Overview({
 	ready,
 	go,
 	refresh,
+	canCancel,
 }: {
 	invoices: Item[];
 	ready: boolean;
 	go: (a: Area) => void;
 	refresh: () => Promise<unknown>;
+	canCancel: boolean;
 }) {
 	const drafts = invoices.filter((x) => x.status === "draft").length,
 		pending = invoices.filter((x) =>
@@ -525,7 +567,7 @@ function Overview({
 						<RefreshCw size={17} /> Atualizar
 					</button>
 				</div>
-				<InvoiceList invoices={invoices} />
+				<InvoiceList invoices={invoices} refresh={refresh} canCancel={canCancel} />
 			</section>
 		</>
 	);
@@ -564,7 +606,7 @@ function MunicipalityPicker({ draft, setDraft, error }: { draft: Draft; setDraft
 	const [searching, setSearching] = useState(false);
 	useEffect(() => { void fetch("/api/nfse/municipalities?q=__warm__").catch(() => undefined); }, []);
 	useEffect(() => {
-		if (query.trim().length < 2 || query === draft.serviceMunicipalityName) { setOptions([]); return; }
+		if (query.trim().length < 2 || query === draft.serviceMunicipalityName) { setOptions([]); setSearching(false); return; }
 		const cacheKey = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 		const cached = municipalitySearchCache.get(cacheKey);
 		if (cached) { setOptions(cached); setSearching(false); return; }
@@ -575,7 +617,15 @@ function MunicipalityPicker({ draft, setDraft, error }: { draft: Draft; setDraft
 				const response = await fetch(`/api/nfse/municipalities?q=${encodeURIComponent(query)}`, { signal: controller.signal });
 				const body = await response.json();
 				if (response.ok) { const rows = body.municipalities || []; municipalitySearchCache.set(cacheKey, rows); setOptions(rows); }
-			} finally { setSearching(false); }
+			} catch (error) {
+				// Trocar de tela ou alterar a busca cancela a requisição anterior.
+				// Isso é esperado e não pode virar um erro fatal no navegador.
+				if (!(error instanceof Error && error.name === "AbortError")) {
+					setOptions([]);
+				}
+			} finally {
+				if (!controller.signal.aborted) setSearching(false);
+			}
 		}, 80);
 		return () => { clearTimeout(timer); controller.abort(); };
 	}, [query, draft.serviceMunicipalityName]);
@@ -590,17 +640,21 @@ function MunicipalityPicker({ draft, setDraft, error }: { draft: Draft; setDraft
 
 type IssueProps = { step: number; setStep: (n: number) => void; draft: Draft; setDraft: (d: Draft) => void; issuer?: Item; takers: Item[]; services: Item[]; cert?: Item; saveDraft: (e?: boolean) => Promise<void> | void; result?: Item; refresh: () => Promise<unknown>; busy: string; go: (a: Area) => void; simulation: boolean; production: boolean };
 
-function TakerPicker({ takers, draft, setDraft, error }: { takers: Item[]; draft: Draft; setDraft: (d: Draft) => void; error?: string }) {
+function TakerPicker({ issuer, takers, draft, setDraft, refresh, error }: { issuer?:Item;takers: Item[]; draft: Draft; setDraft: (d: Draft) => void;refresh:()=>Promise<unknown>; error?: string }) {
 	const selected = takers.find((item) => item.id === draft.takerId);
 	const [query, setQuery] = useState(selected?.legal_name || "");
 	const [open, setOpen] = useState(false);
+	const [searching,setSearching]=useState(false),[lookupMessage,setLookupMessage]=useState(""),[cpfName,setCpfName]=useState("");
+	const lastLookup=useRef("");
 	const normalized = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 	const matches = takers.filter((item) => `${item.legal_name} ${item.tax_id}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(normalized)).slice(0, 8);
-	return <label className="nfse-compact-picker">Tomador *<div className="nfse-search-input"><Search size={17}/><input value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true); setDraft({ ...draft, takerId: "" }); }} placeholder="Busque por nome ou CPF/CNPJ"/>{query && <button type="button" onClick={() => { setQuery(""); setDraft({ ...draft, takerId: "" }); }}>×</button>}</div>{open && query.length > 0 && !draft.takerId && <div className="nfse-picker-options">{matches.map((item) => <button type="button" key={item.id} onClick={() => { setDraft({ ...draft, takerId: item.id }); setQuery(fiscalText(item.legal_name)); setOpen(false); }}><b>{fiscalText(item.legal_name)}</b><small>{item.tax_id}</small></button>)}{!matches.length && <small>Nenhum tomador encontrado.</small>}</div>}{error && <small className="nfse-field-error">{error}</small>}</label>;
+	const lookup=useCallback(async(digits:string,legalName?:string)=>{if(!issuer||searching)return;setSearching(true);setLookupMessage("");try{const response=await fetch("/api/nfse/takers/lookup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({issuerId:issuer.id,taxId:digits,legalName})}),body=await response.json();if(response.status===422&&body.requiresName){setLookupMessage(body.message);setOpen(true);return}if(!response.ok){setLookupMessage(body.error||"Não foi possível identificar o tomador.");return}setDraft({...draft,takerId:body.taker.id});setQuery(fiscalText(body.taker.legal_name));setCpfName("");setOpen(false);await refresh()}catch{setLookupMessage("Falha ao consultar o CPF/CNPJ.")}finally{setSearching(false)}},[issuer,searching,draft,setDraft,refresh]);
+	useEffect(()=>{const digits=onlyDigits(query);if(![11,14].includes(digits.length)||draft.takerId||lastLookup.current===digits)return;lastLookup.current=digits;const known=takers.find(item=>onlyDigits(item.tax_id)===digits);if(known){setDraft({...draft,takerId:known.id});setQuery(fiscalText(known.legal_name));setOpen(false);return}const timer=window.setTimeout(()=>void lookup(digits),250);return()=>window.clearTimeout(timer)},[query,draft,takers,setDraft,lookup]);
+	return <label className="nfse-compact-picker">Tomador *<div className="nfse-search-input"><Search size={17}/><input value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true);setLookupMessage("");lastLookup.current=""; setDraft({ ...draft, takerId: "" }); }} placeholder="Digite o nome, CPF ou CNPJ" inputMode="search" autoComplete="off"/>{searching?<LoaderCircle className="nfse-spinner" size={17}/>:query && <button type="button" onClick={() => { setQuery("");setLookupMessage("");lastLookup.current=""; setDraft({ ...draft, takerId: "" }); }}>×</button>}</div>{searching&&<small className="nfse-lookup-state">Identificando tomador automaticamente…</small>}{open && query.length > 0 && !draft.takerId && <div className="nfse-picker-options">{matches.map((item) => <button type="button" key={item.id} onClick={() => { setDraft({ ...draft, takerId: item.id }); setQuery(fiscalText(item.legal_name)); setOpen(false); }}><b>{fiscalText(item.legal_name)}</b><small>{formatTaxId(item.tax_id)}</small></button>)}{lookupMessage&&<div className="nfse-cpf-inline"><small>{lookupMessage}</small>{onlyDigits(query).length===11&&<><input value={cpfName} onChange={event=>setCpfName(event.target.value)} placeholder="Nome completo do tomador"/><button type="button" disabled={cpfName.trim().length<2||searching} onClick={()=>void lookup(onlyDigits(query),cpfName)}>Confirmar CPF</button></>}</div>}{!matches.length&&!lookupMessage&&onlyDigits(query).length!==11&&onlyDigits(query).length!==14&&<small>Continue digitando o CPF/CNPJ completo para identificar automaticamente.</small>}</div>}{error && <small className="nfse-field-error">{error}</small>}</label>;
 }
 
 function Issue(props: IssueProps) {
-	const { draft, setDraft, takers, services, cert, saveDraft, result, refresh, busy, go, simulation, production } = props;
+	const { draft, setDraft, issuer,takers, services, cert, saveDraft, result, refresh, busy, go, simulation, production } = props;
 	const [errors, setErrors] = useState<Record<string, string>>({});
 	const [retentionsOpen, setRetentionsOpen] = useState(false);
 	const [ibsOpen, setIbsOpen] = useState(false);
@@ -642,12 +696,12 @@ function Issue(props: IssueProps) {
 	return <><PageTitle title="Emitir NFS-e" text="Preencha e revise todos os dados fiscais em uma única tela." />
 		{result && resultOpen && <div className="nfse-issuance-overlay" role="dialog" aria-modal="true" aria-labelledby="nfse-issuance-title"><section className={`nfse-issuance-modal ${result.status || "queued"}`}><button className="nfse-modal-close" aria-label="Fechar acompanhamento" onClick={() => setResultOpen(false)}><X size={20}/></button><div className="nfse-issuance-icon">{result.status === "authorized" ? <CheckCircle2 size={42}/> : result.status === "rejected" || result.status === "technical_failure" ? <X size={42}/> : <LoaderCircle className="nfse-spinner" size={42}/>}</div><h2 id="nfse-issuance-title">{result.status === "authorized" ? "NFS-e autorizada" : result.status === "rejected" ? "Emissão rejeitada" : result.status === "technical_failure" ? "Não foi possível concluir a emissão" : "Emitindo NFS-e, aguarde"}</h2><p className="nfse-issuance-description">{result.status === "authorized" ? "A nota foi autorizada e os documentos fiscais já estão disponíveis." : terminalResult ? "O processamento foi encerrado. Revise os dados antes de tentar novamente." : "Sua nota foi recebida e está sendo processada. Esta janela será atualizada automaticamente."}</p>{!terminalResult && <div className="nfse-live-state"><span><Clock3 size={17}/> Atualização automática em tempo real</span><div className="nfse-progress-track"><i/></div><div className="nfse-process-steps"><b className="done">Recebida</b><b className={result.status !== "queued" ? "done" : "active"}>Processando</b><b>Autorização</b></div></div>}<div className="nfse-result-reference"><small>{result.status === "authorized" ? "Chave da NFS-e" : "Status atual"}</small><b>{result.official_key || ({queued:"Aguardando processamento",claimed:"Preparando a emissão",signing:"Assinando o documento",transmitting:"Transmitindo ao governo",reconciling:"Confirmando a autorização",unknown:"Consultando situação"} as Record<string,string>)[result.status || ""] || result.status || "Aguardando processamento"}</b></div>{result.status === "authorized" && <div className="nfse-result-downloads"><a className="btn secondary" href={`/api/nfse/invoices/${result.id}/xml`}><Download size={18}/> Baixar XML</a><a className="btn" href={`/api/nfse/invoices/${result.id}/pdf`}><Download size={18}/> Baixar PDF</a></div>}{terminalResult && <button className="nfse-modal-finish" onClick={() => setResultOpen(false)}>Fechar</button>}</section></div>}
 		<div className="nfse-compact-layout"><div className="nfse-compact-main">
-			<section className="card nfse-compact-card"><h2><UserRound size={18}/> Tomador e competência</h2><div className="nfse-compact-row taker"><TakerPicker takers={takers} draft={draft} setDraft={setDraft} error={errors.taker}/><label>Data de competência *<input type="date" value={draft.competence} onChange={(e) => setDraft({ ...draft, competence:e.target.value })}/>{errors.competence && <small className="nfse-field-error">{errors.competence}</small>}</label><button className="nfse-outline-action" onClick={() => go("registrations")}><UserRoundPlus size={17}/> Novo tomador</button></div>{selectedTaker && <div className="nfse-taker-strip"><Users size={21}/><div><b>{fiscalText(selectedTaker.legal_name)}</b><small>CNPJ/CPF: {selectedTaker.tax_id}　|　E-mail: {selectedTaker.email || "Não informado"}</small></div></div>}</section>
+			<section className="card nfse-compact-card"><h2><UserRound size={18}/> Tomador e competência</h2><div className="nfse-compact-row taker"><TakerPicker issuer={issuer} takers={takers} draft={draft} setDraft={setDraft} refresh={refresh} error={errors.taker}/><label>Data de competência *<input type="date" value={draft.competence} onChange={(e) => setDraft({ ...draft, competence:e.target.value })}/>{errors.competence && <small className="nfse-field-error">{errors.competence}</small>}</label></div>{selectedTaker && <div className="nfse-taker-strip"><Users size={21}/><div><b>{fiscalText(selectedTaker.legal_name)}</b><small>CPF/CNPJ: {formatTaxId(selectedTaker.tax_id)}{selectedTaker.email?`　|　E-mail: ${selectedTaker.email}`:""}</small></div></div>}</section>
 			<section className="card nfse-compact-card"><h2><Tags size={18}/> Serviço e códigos fiscais</h2><div className="nfse-service-top"><label>Serviço cadastrado *<select value={draft.serviceProfileId} onChange={(e) => chooseService(e.target.value)}><option value="">Selecione o serviço</option>{services.map((item) => <option key={item.id} value={item.id}>{fiscalText(item.name)}</option>)}</select>{errors.service && <small className="nfse-field-error">{errors.service}</small>}</label><div className="nfse-code-strip"><p><small>Código municipal</small><b>{selectedService?.municipal_code || "-"}</b></p><p><small>Código nacional</small><b>{selectedService?.national_code || "-"}</b></p><p><small>NBS</small><b>{selectedService?.nbs_code || "Não informado"}</b></p></div></div><div className="nfse-service-bottom"><label>Discriminação do serviço *<textarea maxLength={1000} value={draft.description} onChange={(e) => setDraft({ ...draft, description:e.target.value })}/><small>{draft.description.length}/1000 caracteres</small>{errors.description && <small className="nfse-field-error">{errors.description}</small>}</label><MunicipalityPicker draft={draft} setDraft={setDraft} error={errors.municipality}/></div></section>
 			<section className="card nfse-compact-card"><h2><Coins size={18}/> Valores, ISS e retenções</h2><div className="nfse-values-grid"><label>Valor do serviço *<input value={draft.amount} onChange={(e) => setDraft({ ...draft, amount:e.target.value })}/>{errors.amount && <small className="nfse-field-error">{errors.amount}</small>}</label><label>Desconto incondicionado<input value={draft.unconditionalDiscount} onChange={(e) => setDraft({ ...draft, unconditionalDiscount:e.target.value })}/></label><label>Desconto condicionado<input value={draft.conditionalDiscount} onChange={(e) => setDraft({ ...draft, conditionalDiscount:e.target.value })}/></label><label>ISS retido? *<select value={draft.issWithholding} onChange={(e) => setDraft({ ...draft, issWithholding:e.target.value as Draft["issWithholding"] })}><option value="not_withheld">Não</option><option value="withheld">Sim</option></select></label><label>Alíquota do ISS (%) *<input value={draft.issRate} onChange={(e) => setDraft({ ...draft, issRate:e.target.value })}/>{errors.issRate && <small className="nfse-field-error">{errors.issRate}</small>}</label><label>Enquadramento do ISS *<select value={draft.issTaxation} onChange={(e) => setDraft({ ...draft, issTaxation:e.target.value as Draft["issTaxation"] })}><option value="taxable">Tributável</option><option value="immune">Imunidade</option><option value="export">Exportação</option><option value="not_incident">Não incidência</option></select></label></div><button className="nfse-expand-button" onClick={() => setRetentionsOpen(!retentionsOpen)}>{retentionsOpen ? <ChevronDown size={18}/> : <ChevronRight size={18}/>} Ver retenções federais (IR, INSS, PIS, COFINS, CSLL)</button>{retentionsOpen && <div className="nfse-retentions-grid">{[["IR", "irRetention"],["INSS", "inssRetention"],["PIS", "pisRetention"],["COFINS", "cofinsRetention"],["CSLL", "csllRetention"]].map(([label,key]) => <label key={key}>{label}<input value={draft[key as keyof Draft] as string} onChange={(e) => setDraft({ ...draft, [key]:e.target.value })}/></label>)}</div>}</section>
 			<section className={`card nfse-compact-bar ${ibsOpen ? "open" : ""}`}><button className="nfse-bar-head" onClick={() => setIbsOpen(!ibsOpen)}><b><Layers3 size={18}/> IBS e CBS · Reforma Tributária</b><small>Opcional conforme o leiaute aplicável.</small><label onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={draft.ibsCbsEnabled} onChange={(e) => { setDraft({ ...draft, ibsCbsEnabled:e.target.checked }); if(e.target.checked) setIbsOpen(true); }}/> Informar IBS/CBS</label>{ibsOpen ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}</button>{ibsOpen && <div className="nfse-bar-content"><div className="nfse-values-grid"><label>Indicador de operação<input maxLength={6} value={draft.ibsCbsOperationIndicator} onChange={(e) => setDraft({ ...draft, ibsCbsOperationIndicator:e.target.value })}/>{errors.ibsOperation && <small className="nfse-field-error">{errors.ibsOperation}</small>}</label><label>CST IBS/CBS<input maxLength={3} value={draft.ibsCbsTaxSituation} onChange={(e) => setDraft({ ...draft, ibsCbsTaxSituation:e.target.value })}/>{errors.ibsTax && <small className="nfse-field-error">{errors.ibsTax}</small>}</label><label>Classificação tributária<input maxLength={6} value={draft.ibsCbsClassification} onChange={(e) => setDraft({ ...draft, ibsCbsClassification:e.target.value })}/>{errors.ibsClass && <small className="nfse-field-error">{errors.ibsClass}</small>}</label><label>Base de cálculo<input value={draft.ibsCbsBase} onChange={(e) => setDraft({ ...draft, ibsCbsBase:e.target.value })}/></label><label>IBS estadual (%)<input value={draft.ibsUfRate} onChange={(e) => setDraft({ ...draft, ibsUfRate:e.target.value })}/></label><label>IBS municipal (%)<input value={draft.ibsMunicipalRate} onChange={(e) => setDraft({ ...draft, ibsMunicipalRate:e.target.value })}/></label><label>CBS (%)<input value={draft.cbsRate} onChange={(e) => setDraft({ ...draft, cbsRate:e.target.value })}/></label></div></div>}</section>
 			<section className={`card nfse-compact-bar ${notesOpen ? "open" : ""}`}><button className="nfse-bar-head" onClick={() => setNotesOpen(!notesOpen)}><b><NotebookText size={18}/> Informações complementares</b>{notesOpen ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}</button>{notesOpen && <div className="nfse-bar-content"><label>Observações e informações adicionais<textarea maxLength={2000} value={draft.additionalInformation} onChange={(e) => setDraft({ ...draft, additionalInformation:e.target.value })}/><small>{draft.additionalInformation.length}/2000 caracteres</small></label></div>}</section>
-		</div><aside className="card nfse-compact-summary"><h2><ReceiptText size={19}/> Resumo da emissão</h2><p><small>Tomador</small><b title={fiscalText(selectedTaker?.legal_name)}>{fiscalText(selectedTaker?.legal_name) || "Não selecionado"}</b></p><p><small>Serviço</small><b title={fiscalText(selectedService?.name)}>{fiscalText(selectedService?.name) || "Não selecionado"}</b></p><p><small>Valor do serviço</small><b>{money(draft.amount).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p><p><small>ISS estimado</small><b>{iss.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p><div className={`nfse-cert-state ${cert ? "ok" : "pending"}`}><ShieldCheck size={20}/>{cert ? "Certificado pronto" : "Certificado pendente"}</div><div className="nfse-summary-actions"><button className="btn secondary" disabled={Boolean(busy)} onClick={save}><Save size={17}/> Salvar rascunho</button>{cert ? <button className="btn" disabled={Boolean(busy)} onClick={emit}><Send size={17}/>{busy === "issue" ? "Enfileirando..." : simulation ? "Emitir simulação" : production ? "Emitir NFS-e" : "Emitir em homologação"}</button> : <button className="btn" onClick={() => go("settings")}>Configurar certificado</button>}<button className="nfse-cancel" onClick={() => go("overview")}>Cancelar e voltar</button></div>{Object.keys(errors).length > 0 && <small className="nfse-field-error">Revise os campos destacados.</small>}</aside></div>
+		</div><aside className="card nfse-compact-summary"><h2><ReceiptText size={19}/> Resumo da emissão</h2><p><small>Tomador</small><b title={fiscalText(selectedTaker?.legal_name)}>{fiscalText(selectedTaker?.legal_name) || "Não selecionado"}</b></p><p><small>Serviço</small><b title={fiscalText(selectedService?.name)}>{fiscalText(selectedService?.name) || "Não selecionado"}</b></p><p><small>Valor do serviço</small><b>{money(draft.amount).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p><p><small>ISS estimado</small><b>{iss.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p><div className={`nfse-cert-state ${cert ? "ok" : "pending"}`}><ShieldCheck size={20}/>{cert?.signing_mode==="representation" ? "Assinatura por representação" : cert ? "Certificado próprio pronto" : "Assinatura pendente"}</div><div className="nfse-summary-actions"><button className="btn secondary" disabled={Boolean(busy)} onClick={save}><Save size={17}/> Salvar rascunho</button>{cert ? <button className="btn" disabled={Boolean(busy)} onClick={emit}><Send size={17}/>{busy === "issue" ? "Enfileirando..." : simulation ? "Emitir simulação" : production ? "Emitir NFS-e" : "Emitir em homologação"}</button> : <button className="btn" onClick={() => go("settings")}>Configurar assinatura</button>}<button className="nfse-cancel" onClick={() => go("overview")}>Cancelar e voltar</button></div>{Object.keys(errors).length > 0 && <small className="nfse-field-error">Revise os campos destacados.</small>}</aside></div>
 	</>;
 }
 
@@ -1046,17 +1100,16 @@ function representationIssuer(record: RepresentationRecord) {
 	return { taxId: record.tax_id || relation?.tax_id, legalName: record.legal_name || relation?.legal_name };
 }
 
-function RepresentationWorkspace({ data, onIssuerChange, refresh }: { data: Data; onIssuerChange: (id: string) => void; refresh: () => Promise<unknown> }) {
+function RepresentationWorkspace({ data, representativeIssuer, onRepresent, refresh }: { data: Data; representativeIssuer?:Item; onRepresent: (issuer:Item) => void; refresh: () => Promise<unknown> }) {
 	const [taxIdInput, setTaxIdInput] = useState("");
 	const [candidate, setCandidate] = useState<Item | null>(null);
 	const [representations, setRepresentations] = useState<RepresentationRecord[]>([]);
-	const [password, setPassword] = useState("");
-	const [recoveryEmail, setRecoveryEmail] = useState("");
-	const [officialAuthorization, setOfficialAuthorization] = useState(false);
+	const [confirmationCandidate,setConfirmationCandidate]=useState<Item|null>(null);
 	const [busy, setBusy] = useState(false);
 	const [lookupBusy, setLookupBusy] = useState(false);
 	const [feedback, setFeedback] = useState("");
 	const [companyDraft, setCompanyDraft] = useState<RepresentedCompanyDraft | null>(null);
+	const candidateRepresentation=data.representations?.find(item=>item.issuer_id===candidate?.id);
 
 	const loadRepresentations = useCallback(async () => {
 		const response = await fetch("/api/nfse/representations", { cache: "no-store" });
@@ -1074,8 +1127,8 @@ function RepresentationWorkspace({ data, onIssuerChange, refresh }: { data: Data
 		const found = data.issuers.find((item) => onlyDigits(item.tax_id) === digits);
 		if (found) {
 			setCandidate(found);
-			onIssuerChange(found.id);
 			setTaxIdInput(formatTaxId(found.tax_id));
+			setConfirmationCandidate(found);
 			return;
 		}
 		if (digits.length !== 14) return setFeedback("O cadastro automático está disponível para CNPJ. O suporte fiscal a emitentes pessoa física depende do município.");
@@ -1098,31 +1151,26 @@ function RepresentationWorkspace({ data, onIssuerChange, refresh }: { data: Data
 			const body = await response.json();
 			if (!response.ok) throw new Error(body.error || "Não foi possível cadastrar a empresa representada.");
 			const registered = { id: body.id, tax_id: companyDraft.taxId, legal_name: companyDraft.legalName };
-			setCandidate(registered); setCompanyDraft(null); onIssuerChange(body.id);
-			setFeedback("Empresa cadastrada. Agora confirme a autorização e defina a senha inicial do cliente.");
+			setCandidate(registered); setCompanyDraft(null);setConfirmationCandidate(registered);
+			setFeedback("Cadastro fiscal criado. Confirme agora a entrada no contexto representado.");
 			await refresh();
 		} catch (error) { setFeedback(error instanceof Error ? error.message : "Não foi possível cadastrar a empresa."); }
 		finally { setBusy(false); }
 	}
 
-	async function confirmRepresentation(event: React.FormEvent<HTMLFormElement>) {
-		event.preventDefault();
-		if (!candidate || busy) return;
-		if (!officialAuthorization) return setFeedback("Confirme que a autorização já está válida no ambiente oficial da NFS-e.");
-		if (password.length < 8) return setFeedback("A senha inicial deve ter pelo menos 8 caracteres.");
-		const representativeCertificate = data.certificates.find((item) => item.status === "active" && onlyDigits(item.subject_tax_id) !== onlyDigits(candidate.tax_id));
+	async function confirmRepresentation() {
+		const target=confirmationCandidate;
+		if (!target || busy) return;
+		const representativeCertificate = data.certificates.find((item) => item.status === "active" && item.issuer_id===representativeIssuer?.id);
 		if (!representativeCertificate) return setFeedback("Não há certificado ativo do escritório disponível para representar esta empresa.");
 		setBusy(true); setFeedback("");
 		try {
-			const representationResponse = await fetch("/api/nfse/representations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ issuerId: candidate.id, certificateId: representativeCertificate.id, authorizationType: "electronic_power_of_attorney", allowClientIssuance: true, allowCancellation: false }) });
+			const representationResponse = await fetch("/api/nfse/representations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ issuerId: target.id, certificateId: representativeCertificate.id, authorizationType: "electronic_power_of_attorney", allowClientIssuance: true, allowCancellation: true }) });
 			const representationBody = await representationResponse.json();
 			if (!representationResponse.ok) throw new Error(representationBody.error || "Não foi possível cadastrar a representação.");
-			const accountResponse = await fetch("/api/nfse/representations/client-account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ issuerId: candidate.id, name: candidate.legal_name, password, recoveryEmail: recoveryEmail || null }) });
-			const accountBody = await accountResponse.json();
-			if (!accountResponse.ok && accountResponse.status !== 409) throw new Error(accountBody.error || "Não foi possível criar o acesso do cliente.");
-			setFeedback(accountResponse.ok ? `Representação configurada. O login do cliente é ${formatTaxId(accountBody.loginTaxId)}.` : `Representação configurada. ${accountBody.error}`);
-			setPassword(""); setOfficialAuthorization(false);
+			setFeedback(`Representação de ${target.legal_name} ativada.`);setConfirmationCandidate(null);
 			await Promise.all([loadRepresentations(), refresh()]);
+			onRepresent(target);
 		} catch (error) { setFeedback(error instanceof Error ? error.message : "Não foi possível concluir a configuração."); }
 		finally { setBusy(false); }
 	}
@@ -1148,30 +1196,25 @@ function RepresentationWorkspace({ data, onIssuerChange, refresh }: { data: Data
 				</div>
 				<button disabled={busy}>{busy ? "Cadastrando…" : "Cadastrar e continuar"}</button>
 			</form>}
-			{candidate && <form className="nfse-representation-confirm" onSubmit={confirmRepresentation}>
-				<div className="nfse-represented-company"><Handshake size={26} /><div><small>Empresa localizada</small><strong>{candidate.legal_name}</strong><span>{formatTaxId(candidate.tax_id)}</span></div></div>
-				<label className="nfse-official-confirm"><input type="checkbox" checked={officialAuthorization} onChange={(event) => setOfficialAuthorization(event.target.checked)} /> <span>Confirmo que a procuração eletrônica ou representação legal já está válida no ambiente oficial da NFS-e.</span></label>
-				<div className="nfse-client-access"><h3>Acesso do cliente representado</h3><p>O nome será <b>{candidate.legal_name}</b> e o login será o CNPJ acima. Defina somente a senha inicial.</p>
-					<label>Senha inicial *<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} autoComplete="new-password" required /></label>
-					<label>E-mail de recuperação <small>Opcional</small><input type="email" value={recoveryEmail} onChange={(event) => setRecoveryEmail(event.target.value)} /></label>
-				</div>
-				<button disabled={busy}>{busy ? "Configurando…" : "Confirmar representação e criar acesso"}</button>
-			</form>}
+			{candidate&&candidateRepresentation&&<div className="nfse-representation-active"><Handshake size={24}/><div><strong>Representação ativa</strong><span>A SOCIUM pode emitir por {candidate.legal_name} usando o certificado de {representativeIssuer?.legal_name}.</span></div><button type="button" className="btn" onClick={()=>setConfirmationCandidate(candidate)}><LogIn size={17}/> Representar</button></div>}
 			{feedback && <div className="nfse-inline-feedback" role="status">{feedback}</div>}
 			<div className="nfse-recent-representations"><h2>Representações recentes</h2>
-				{representations.length ? representations.map((record) => { const represented = representationIssuer(record); return <div className="nfse-recent-representation" key={record.id}><UserRound size={25} /><div><strong>{represented.legalName || "Empresa representada"}</strong><span>{formatTaxId(represented.taxId)}</span></div><button type="button" title="Representar esta empresa" onClick={() => { const item = data.issuers.find((issuer) => issuer.id === record.issuer_id); if (item) { setCandidate(item); setTaxIdInput(formatTaxId(item.tax_id)); onIssuerChange(item.id); } }}><LogIn size={21} /></button></div>; }) : <p className="nfse-empty">Nenhuma representação cadastrada.</p>}
+				{representations.length ? representations.map((record) => { const represented = representationIssuer(record); return <div className="nfse-recent-representation" key={record.id}><UserRound size={25} /><div><strong>{represented.legalName || "Empresa representada"}</strong><span>{formatTaxId(represented.taxId)}</span></div><button type="button" title="Representar esta empresa" onClick={() => { const item = data.issuers.find((issuer) => issuer.id === record.issuer_id); if(item)setConfirmationCandidate(item) }}><LogIn size={21} /></button></div>; }) : <p className="nfse-empty">Nenhuma representação cadastrada.</p>}
 			</div>
+			{confirmationCandidate&&<div className="nfse-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="representation-confirm-title"><section><button className="nfse-modal-close" type="button" aria-label="Fechar" onClick={()=>setConfirmationCandidate(null)}><X size={20}/></button><h2 id="representation-confirm-title"><ShieldCheck size={22}/> Confirmação</h2><p>Tem certeza que deseja representar <b>{confirmationCandidate.legal_name}</b> com o CPF/CNPJ <b>{formatTaxId(confirmationCandidate.tax_id)}</b>?</p><small>A procuração eletrônica ou representação legal deve estar previamente válida no ambiente oficial da NFS-e.</small><div><button type="button" className="btn" disabled={busy} onClick={()=>void confirmRepresentation()}>{busy?"Confirmando…":"Sim, representar"}</button><button type="button" className="btn secondary" onClick={()=>setConfirmationCandidate(null)}>Não</button></div></section></div>}
 		</section>
 	</>;
 }
 
-function CertificateSettingsSimple({ issuer, cert, setMessage, refresh }: { issuer?: Item; cert?: Item; setMessage: (message: string) => void; refresh: () => Promise<unknown> }) {
+function CertificateSettingsSimple({ issuer, cert, representation, representativeCert, go, setMessage, refresh }: { issuer?: Item; cert?: Item; representation?:Item; representativeCert?:Item; go:(area:Area)=>void; setMessage: (message: string) => void; refresh: () => Promise<unknown> }) {
 	const [uploading, setUploading] = useState(false);
 	const [feedback, setFeedback] = useState("");
 	const [identifierBusy, setIdentifierBusy] = useState(false);
-	return <><PageTitle title="Configurações" text="Certificado digital e acesso do escritório." /><section className="card nfse-card full"><h2>Certificado A1</h2>
+	return <><PageTitle title="Configurações" text="Forma de assinatura fiscal e acesso do escritório." /><section className="card nfse-card full"><h2>{representation?"Assinatura por representação":"Certificado A1"}</h2>
+		{representation&&<div className="nfse-representation-settings"><Handshake/><div><b>Empresa representada pela SOCIUM</b><p>O certificado A1 utilizado pertence ao representante: {formatTaxId(representativeCert?.subject_tax_id)}.</p><p>Não é necessário nem recomendado cadastrar o certificado da empresa representada.</p></div><span className="badge green">Ativa</span></div>}
 		{cert && <div className="nfse-certificate"><ShieldCheck /><div><b>Certificado ativo</b><p>Titular: {formatTaxId(cert.subject_tax_id)}</p><p>Válido até {new Date(cert.not_after || "").toLocaleDateString("pt-BR")}</p></div><span className="badge green">Válido</span></div>}
-		{issuer ? <form onSubmit={async (event) => { event.preventDefault(); if (uploading) return; setUploading(true); setFeedback(""); setMessage(""); const form = event.currentTarget; try { const response = await fetch("/api/nfse/certificates", { method: "POST", body: new FormData(form) }); const body = await response.json(); setFeedback(response.ok ? "Certificado armazenado com segurança." : body.error || "Não foi possível adicionar o certificado."); if (response.ok) { form.reset(); await refresh(); } } catch { setFeedback("Falha de comunicação durante o envio."); } finally { setUploading(false); } }}><input type="hidden" name="issuerId" value={issuer.id} /><input name="certificate" type="file" accept=".pfx,.p12" required /><input name="password" type="password" required placeholder="Senha do certificado" />{feedback && <div className="nfse-inline-feedback" role="status">{feedback}</div>}<button disabled={uploading}>{uploading ? "Validando certificado…" : cert ? "Substituir certificado" : "Adicionar certificado"}</button></form> : <p className="nfse-empty">Selecione uma empresa emissora.</p>}
+		{!representation&&(issuer ? <form onSubmit={async (event) => { event.preventDefault(); if (uploading) return; setUploading(true); setFeedback(""); setMessage(""); const form = event.currentTarget; try { const response = await fetch("/api/nfse/certificates", { method: "POST", body: new FormData(form) }); const body = await response.json(); setFeedback(response.ok ? "Certificado armazenado com segurança." : body.error || "Não foi possível adicionar o certificado."); if (response.ok) { form.reset(); await refresh(); } } catch { setFeedback("Falha de comunicação durante o envio."); } finally { setUploading(false); } }}><input type="hidden" name="issuerId" value={issuer.id} /><input name="certificate" type="file" accept=".pfx,.p12" required /><input name="password" type="password" required placeholder="Senha do certificado" />{feedback && <div className="nfse-inline-feedback" role="status">{feedback}</div>}<button disabled={uploading}>{uploading ? "Validando certificado…" : cert ? "Substituir certificado" : "Adicionar certificado"}</button></form> : <p className="nfse-empty">Selecione uma empresa emissora.</p>)}
+		{!representation&&!cert&&issuer&&<div className="nfse-signing-choice"><span>Esta empresa será emitida por procuração?</span><button type="button" className="btn secondary" onClick={()=>go("representations")}><Handshake size={17}/> Configurar representação</button></div>}
 	</section><section className="card nfse-card full"><h2>CPF/CNPJ de acesso do escritório</h2><p className="hint">Identificador usado pelo escritório para entrar na Helians.</p><form onSubmit={async (event) => { event.preventDefault(); if (identifierBusy) return; setIdentifierBusy(true); const values = new FormData(event.currentTarget); try { const response = await fetch("/api/auth/account-identifier", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taxId: values.get("taxId") }) }); const body = await response.json(); setMessage(response.ok ? `Acesso ativado para ${formatTaxId(body.loginTaxId)}.` : body.error || "Não foi possível ativar o identificador."); } finally { setIdentifierBusy(false); } }}><label>CPF/CNPJ do titular *<input name="taxId" inputMode="numeric" placeholder="00.000.000/0000-00" required /></label><button disabled={identifierBusy}>{identifierBusy ? "Confirmando…" : "Ativar acesso"}</button></form></section></>;
 }
 
@@ -1269,7 +1312,7 @@ function CertificateSettings({
 				{data.certificates.some((item) => item.status === "active") ? <form onSubmit={async (event) => {
 					event.preventDefault(); setRepresentationBusy(true); setRepresentationFeedback("");
 					const values = new FormData(event.currentTarget);
-					const response = await fetch("/api/nfse/representations", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ issuerId:values.get("issuerId"), certificateId:values.get("certificateId"), authorizationType:"electronic_power_of_attorney", allowClientIssuance:values.get("allowClientIssuance")==="on", allowCancellation:false }) });
+					const response = await fetch("/api/nfse/representations", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ issuerId:values.get("issuerId"), certificateId:values.get("certificateId"), authorizationType:"electronic_power_of_attorney", allowClientIssuance:values.get("allowClientIssuance")==="on", allowCancellation:true }) });
 					const body = await response.json(); setRepresentationFeedback(response.ok ? "Representação ativada. O certificado do escritório poderá assinar por esta empresa." : body.error || "Não foi possível cadastrar a representação.");
 					if (response.ok) await refresh(); setRepresentationBusy(false);
 				}}>
@@ -1298,26 +1341,36 @@ function CertificateSettings({
 		</>
 	);
 }
-function InvoiceList({ invoices }: { invoices: Item[] }) {
+function InvoiceList({ invoices, refresh, canCancel }: { invoices: Item[]; refresh: () => Promise<unknown>; canCancel: boolean }) {
+	const [selected,setSelected]=useState<Item|null>(null),[reasonCode,setReasonCode]=useState("1"),[reason,setReason]=useState(""),[busy,setBusy]=useState(false),[feedback,setFeedback]=useState(""),[submitted,setSubmitted]=useState(false);
+	const current=selected?invoices.find(x=>x.id===selected.id)||selected:null,pending=submitted&&["queued","processing"].includes(current?.cancellation_status||""),succeeded=submitted&&current?.status==="cancelled",failed=submitted&&!pending&&!succeeded&&Boolean(current?.cancellation_error);
+	useEffect(()=>{if(!invoices.some(x=>["queued","processing"].includes(x.cancellation_status||"")))return;const timer=window.setInterval(()=>void refresh(),3000);return()=>window.clearInterval(timer)},[invoices,refresh]);
+	async function cancelInvoice(){
+		if(!selected||busy)return;setBusy(true);setFeedback("");
+		try{const response=await fetch(`/api/nfse/invoices/${selected.id}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reasonCode,reason})}),body=await response.json();if(!response.ok){setFeedback(body.error||"Não foi possível solicitar o cancelamento.");return}setSubmitted(true);await refresh()}catch{setFeedback("Falha de comunicação ao solicitar o cancelamento.")}finally{setBusy(false)}
+	}
 	return invoices.length ? (
-		<ul className="nfse-invoices">
+		<><ul className="nfse-invoices">
 			{invoices.slice(0, 10).map((x) => (
 				<li key={x.id}>
 					<span className="nfse-invoice-description">{displayFiscalText(x.description)}</span>
-					<span className={`nfse-status ${x.status}`}>{statusLabel(x.status)}</span>
+					<span className={`nfse-status ${x.cancellation_status&&x.status!=="cancelled"?`cancellation-${x.cancellation_status}`:x.status}`}>{x.cancellation_status && x.status!=="cancelled" ? cancellationLabel(x.cancellation_status) : statusLabel(x.status)}</span>
 					{x.official_key && (
 						<div className="nfse-invoice-downloads">
 							<a className="nfse-artifact-link" href={`/api/nfse/invoices/${x.id}/xml`}><FileText size={15} /> XML</a>
 							<a className="nfse-artifact-link primary" href={`/api/nfse/invoices/${x.id}/pdf`}><Download size={15} /> PDF</a>
+							{canCancel&&x.status==="authorized"&&!x.cancellation_status&&<button className="nfse-artifact-link danger" type="button" onClick={()=>{setSelected(x);setReasonCode("1");setReason("");setFeedback("");setSubmitted(false)}}><Ban size={15}/> Cancelar</button>}
 						</div>
 					)}
 				</li>
 			))}
-		</ul>
+		</ul>{selected&&<div className="nfse-issuance-overlay" role="dialog" aria-modal="true" aria-labelledby="nfse-cancel-title"><section className={`nfse-issuance-modal nfse-cancel-modal ${succeeded?"authorized":failed?"rejected":""}`}><button className="nfse-modal-close" aria-label="Fechar" onClick={()=>setSelected(null)}><X size={20}/></button><div className="nfse-issuance-icon">{pending?<LoaderCircle className="nfse-spinner" size={38}/>:succeeded?<CheckCircle2 size={38}/>:<Ban size={38}/>}</div><h2 id="nfse-cancel-title">{pending?"Cancelando NFS-e, aguarde":succeeded?"NFS-e cancelada":failed?"Cancelamento não realizado":"Cancelar NFS-e"}</h2><p className="nfse-issuance-description">{pending?"O pedido está sendo processado. Esta janela e a lista serão atualizadas automaticamente.":succeeded?"O cancelamento foi autorizado pelo ambiente nacional.":failed?current?.cancellation_error:"Esta solicitação será enviada ao ambiente nacional e, se autorizada, não poderá ser desfeita."}</p>{!submitted&&<><label>Motivo *<select value={reasonCode} onChange={e=>setReasonCode(e.target.value)}><option value="1">Erro na emissão</option><option value="2">Serviço não prestado</option><option value="9">Outros</option></select></label><label>Justificativa *<textarea value={reason} onChange={e=>setReason(e.target.value)} minLength={15} maxLength={255} placeholder="Descreva o motivo com pelo menos 15 caracteres"/><small>{reason.length}/255 caracteres</small></label>{feedback&&<div className="nfse-inline-feedback" role="status">{feedback}</div>}</>}{pending&&<div className="nfse-live-state"><span><Clock3 size={17}/> Acompanhamento automático</span><div className="nfse-progress-track"><i/></div></div>}<div className="nfse-result-downloads"><button className="btn secondary" type="button" onClick={()=>setSelected(null)}>{submitted?"Fechar":"Voltar"}</button>{!submitted&&<button className="btn nfse-danger" type="button" disabled={busy||reason.trim().length<15} onClick={()=>void cancelInvoice()}>{busy?<LoaderCircle className="nfse-spinner" size={17}/>:<Ban size={17}/>} Confirmar cancelamento</button>}{failed&&<button className="btn nfse-danger" type="button" onClick={()=>{setSubmitted(false);setFeedback("")}}>Tentar novamente</button>}</div></section></div>}</>
 	) : (
 		<div className="nfse-empty">Nenhuma nota ou rascunho encontrado.</div>
 	);
 }
+
+function cancellationLabel(status?:string){return ({queued:"Cancelamento na fila",processing:"Cancelando…",authorized:"Cancelada",rejected:"Cancelamento rejeitado",technical_failure:"Falha ao cancelar",unknown:"Confirmação pendente"} as Record<string,string>)[status||""]||"Cancelamento pendente"}
 
 function displayFiscalText(value?: string) {
 	return (value || "Sem descrição")
@@ -1334,6 +1387,7 @@ function statusLabel(status?: string) {
 		transmitting: "Transmitindo",
 		reconciling: "Consultando",
 		authorized: "Autorizada",
+		cancelled: "Cancelada",
 		rejected: "Rejeitada",
 		technical_failure: "Falha técnica",
 		unknown: "Aguardando confirmação",

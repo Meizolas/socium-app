@@ -97,7 +97,7 @@ export async function GET(request: Request) {
 					[c.officeId],
 				),
 				localQuery(
-					"select id,issuer_id,taker_id,service_profile_id,status,competence,amount,description,official_key,simulation_reference,created_at from nfse_invoices where office_id=$1 order by created_at desc",
+					"select id,issuer_id,taker_id,service_profile_id,status,competence,amount,description,official_key,simulation_reference,cancellation_status,cancelled_at,cancellation_reason,created_at from nfse_invoices where office_id=$1 order by created_at desc",
 					[c.officeId],
 				),
 				localQuery(
@@ -105,7 +105,7 @@ export async function GET(request: Request) {
 					[c.officeId],
 				),
 				localQuery(
-					"select issuer_id from nfse_representations where office_id=$1 and status='active' and valid_from<=now() and (valid_until is null or valid_until>now())",
+					"select r.issuer_id,r.certificate_id,r.authorization_type,r.valid_until,r.allow_client_issuance,r.allow_cancellation,c.subject_tax_id,c.not_after from nfse_representations r join nfse_certificates c on c.id=r.certificate_id where r.office_id=$1 and r.status='active' and r.valid_from<=now() and (r.valid_until is null or r.valid_until>now()) and c.status='active' and c.not_before<=now() and c.not_after>now()",
 					[c.officeId],
 				),
 			]),
@@ -122,6 +122,7 @@ export async function GET(request: Request) {
 				allowed(String(x.issuer_id)),
 			),
 			signingReadyIssuerIds: representations.rows.map((x) => String(x.issuer_id)).filter(allowed),
+			representations: representations.rows.filter((x) => allowed(String(x.issuer_id))),
 		});
 	} catch (error) {
 		return authError(error);
@@ -230,9 +231,9 @@ async function remoteWorkspace(c: Awaited<ReturnType<typeof requireAppContext>>)
 	let issuersQuery = db.from("nfse_issuers").select("id,tax_id,legal_name,enabled").eq("office_id", c.officeId).order("legal_name");
 	let servicesQuery = db.from("nfse_service_profiles").select("id,issuer_id,name,description,national_code,municipal_code,nbs_code,taxation,service_municipality_ibge,operation_indicator,tax_situation").eq("office_id", c.officeId).order("name");
 	let takersQuery = db.from("nfse_takers").select("id,issuer_id,tax_id,legal_name,email,address").eq("office_id", c.officeId).order("legal_name");
-	let invoicesQuery = db.from("nfse_invoices").select("id,issuer_id,taker_id,service_profile_id,status,competence,amount,description,official_key,simulation_reference,created_at").eq("office_id", c.officeId).order("created_at", { ascending: false });
+	let invoicesQuery = db.from("nfse_invoices").select("id,issuer_id,taker_id,service_profile_id,status,competence,amount,description,official_key,simulation_reference,cancellation_status,cancelled_at,cancellation_reason,created_at").eq("office_id", c.officeId).order("created_at", { ascending: false });
 	let certificatesQuery = db.from("nfse_certificates").select("id,issuer_id,fingerprint_sha256,subject_tax_id,not_before,not_after,status").eq("office_id", c.officeId).order("created_at", { ascending: false });
-	let representationsQuery = db.from("nfse_representations").select("issuer_id").eq("office_id", c.officeId).eq("status", "active").lte("valid_from", new Date().toISOString()).or(`valid_until.is.null,valid_until.gt.${new Date().toISOString()}`);
+	let representationsQuery = db.from("nfse_representations").select("issuer_id,certificate_id,authorization_type,valid_until,allow_client_issuance,allow_cancellation,nfse_certificates!inner(subject_tax_id,not_after,status,not_before)").eq("office_id", c.officeId).eq("status", "active").lte("valid_from", new Date().toISOString()).or(`valid_until.is.null,valid_until.gt.${new Date().toISOString()}`).eq("nfse_certificates.status","active").lte("nfse_certificates.not_before",new Date().toISOString()).gt("nfse_certificates.not_after",new Date().toISOString());
 	if (c.issuerScope) {
 		const scope = c.issuerScope.length ? c.issuerScope : ["00000000-0000-0000-0000-000000000000"];
 		issuersQuery = issuersQuery.in("id", scope);servicesQuery = servicesQuery.in("issuer_id", scope);takersQuery = takersQuery.in("issuer_id", scope);invoicesQuery = invoicesQuery.in("issuer_id", scope);certificatesQuery = certificatesQuery.in("issuer_id", scope);
@@ -241,7 +242,10 @@ async function remoteWorkspace(c: Awaited<ReturnType<typeof requireAppContext>>)
 	const [issuers, services, takers, invoices, certificates, representations] = await Promise.all([issuersQuery, servicesQuery, takersQuery, invoicesQuery, certificatesQuery, representationsQuery]);
 	const failed = [issuers, services, takers, invoices, certificates, representations].find((result) => result.error);
 	if (failed?.error) throw new Error(failed.error.message);
-	return Response.json({ simulation: false, role: c.role, environment: fiscalEnvironment() === 1 ? "government_production" : "government_homologation", issuers: issuers.data, services: services.data, takers: takers.data, invoices: invoices.data, certificates: certificates.data, signingReadyIssuerIds: (representations.data || []).map((x) => x.issuer_id) });
+	const errorResult=await db.from("nfse_invoices").select("id,cancellation_error").eq("office_id",c.officeId);
+	const errorsById=new Map((errorResult.error?[]:errorResult.data||[]).map(x=>[x.id,x.cancellation_error]));
+	const invoiceData=(invoices.data||[]).map(x=>({...x,cancellation_error:errorsById.get(x.id)||null}));
+	return Response.json({ simulation: false, role: c.role, environment: fiscalEnvironment() === 1 ? "government_production" : "government_homologation", issuers: issuers.data, services: services.data, takers: takers.data, invoices: invoiceData, certificates: certificates.data, representations:representations.data||[], signingReadyIssuerIds: (representations.data || []).map((x) => x.issuer_id) });
 }
 
 async function remoteMutation(c: Awaited<ReturnType<typeof requireAppContext>>, x: z.infer<typeof actions>) {
