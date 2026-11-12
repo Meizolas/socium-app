@@ -113,6 +113,7 @@ export async function GET(request: Request) {
 				c.issuerScope === null || c.issuerScope.includes(issuerId);
 		return Response.json({
 			simulation: true,
+			role: c.role,
 			issuers: issuers.rows.filter((x) => allowed(String(x.id))),
 			services: services.rows.filter((x) => allowed(String(x.issuer_id))),
 			takers: takers.rows.filter((x) => allowed(String(x.issuer_id))),
@@ -240,7 +241,7 @@ async function remoteWorkspace(c: Awaited<ReturnType<typeof requireAppContext>>)
 	const [issuers, services, takers, invoices, certificates, representations] = await Promise.all([issuersQuery, servicesQuery, takersQuery, invoicesQuery, certificatesQuery, representationsQuery]);
 	const failed = [issuers, services, takers, invoices, certificates, representations].find((result) => result.error);
 	if (failed?.error) throw new Error(failed.error.message);
-	return Response.json({ simulation: false, environment: fiscalEnvironment() === 1 ? "government_production" : "government_homologation", issuers: issuers.data, services: services.data, takers: takers.data, invoices: invoices.data, certificates: certificates.data, signingReadyIssuerIds: (representations.data || []).map((x) => x.issuer_id) });
+	return Response.json({ simulation: false, role: c.role, environment: fiscalEnvironment() === 1 ? "government_production" : "government_homologation", issuers: issuers.data, services: services.data, takers: takers.data, invoices: invoices.data, certificates: certificates.data, signingReadyIssuerIds: (representations.data || []).map((x) => x.issuer_id) });
 }
 
 async function remoteMutation(c: Awaited<ReturnType<typeof requireAppContext>>, x: z.infer<typeof actions>) {

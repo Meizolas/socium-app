@@ -32,8 +32,10 @@ import {
 	ChevronDown as ProfileChevronDown,
 	CircleChevronLeft,
 	LayoutGrid,
+	Handshake,
+	LogIn,
 } from "lucide-react";
-type Area = "overview" | "issue" | "registrations" | "settings" | "setup";
+type Area = "overview" | "issue" | "registrations" | "representations" | "settings" | "setup";
 type Item = {
 	id: string;
 	issuer_id?: string;
@@ -63,6 +65,7 @@ type Item = {
 };
 type Data = {
 	simulation: boolean;
+	role?: "admin" | "operator" | "client";
 	environment?: "government_homologation" | "government_production";
 	issuers: Item[];
 	services: Item[];
@@ -238,7 +241,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 	}
 	return (
 		<div className={`app nfse-app ${collapsed ? "sidebar-collapsed" : ""}`}>
-			<Sidebar area={area} go={setArea} collapsed={collapsed} setCollapsed={setCollapsed} />
+			<Sidebar area={area} go={setArea} collapsed={collapsed} setCollapsed={setCollapsed} role={data.role} />
 			<main>
 				<Topbar
 					area={area}
@@ -293,9 +296,11 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 					{area === "registrations" && (
 						<Registrations issuer={issuer} submit={form} busy={busy.startsWith("registration:")} />
 					)}{" "}
+					{area === "representations" && (
+						<RepresentationWorkspace data={data} onIssuerChange={setIssuerId} refresh={load} />
+					)}{" "}
 					{area === "settings" && (
-						<CertificateSettings
-							data={data}
+						<CertificateSettingsSimple
 							issuer={issuer}
 							cert={cert}
 							setMessage={setMessage}
@@ -307,7 +312,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 		</div>
 	);
 }
-function Sidebar({ area, go, collapsed, setCollapsed }: { area: Area; go: (a: Area) => void; collapsed: boolean; setCollapsed: (value: boolean) => void }) {
+function Sidebar({ area, go, collapsed, setCollapsed, role }: { area: Area; go: (a: Area) => void; collapsed: boolean; setCollapsed: (value: boolean) => void; role?: Data["role"] }) {
 	const item = (key: Area, label: string, Icon: typeof Home) => (
 		<button className={area === key ? "active" : ""} onClick={() => go(key)} title={collapsed ? label : undefined}>
 			<Icon size={20} />
@@ -322,6 +327,7 @@ function Sidebar({ area, go, collapsed, setCollapsed }: { area: Area; go: (a: Ar
 				{item("overview", "Visão geral", Home)}
 				{item("issue", "Emitir NFS-e", FilePlus2)}
 				{item("registrations", "Cadastros fiscais", Users)}
+				{role === "admin" && item("representations", "Representação", Handshake)}
 				{item("settings", "Configurações", Settings)}
 			</nav>
 			<button className="collapse" onClick={() => setCollapsed(!collapsed)}>
@@ -353,7 +359,7 @@ function Topbar({
 	onOpenModules: () => void;
 }) {
 	const [profileOpen, setProfileOpen] = useState(false);
-	const labels: Record<Area, string> = { overview: "Visão geral", issue: "Emitir NFS-e", registrations: "Cadastros fiscais", settings: "Configurações", setup: "Configuração inicial" };
+	const labels: Record<Area, string> = { overview: "Visão geral", issue: "Emitir NFS-e", registrations: "Cadastros fiscais", representations: "Representação", settings: "Configurações", setup: "Configuração inicial" };
 	async function logout() { await fetch("/api/auth/logout", { method: "POST" }); location.reload(); }
 	return (
 		<header>
@@ -999,6 +1005,176 @@ function Registrations({
 		</>
 	);
 }
+type RepresentationRecord = {
+	id: string;
+	issuer_id: string;
+	status?: string;
+	tax_id?: string;
+	legal_name?: string;
+	nfse_issuers?: { tax_id?: string; legal_name?: string } | Array<{ tax_id?: string; legal_name?: string }>;
+};
+type RepresentedCompanyDraft = {
+	taxId: string;
+	legalName: string;
+	municipalityIbge: string;
+	municipalityName?: string;
+	uf?: string;
+	simpleNationalOption: "1" | "2" | "3";
+	simpleNationalTaxationRegime: "1" | "2";
+	specialTaxRegime: string;
+	dpsSeries: string;
+};
+
+function onlyDigits(value?: string) {
+	return (value || "").replace(/\D/g, "");
+}
+
+function formatTaxId(value?: string) {
+	const digits = onlyDigits(value);
+	if (digits.length <= 11) return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+	return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+}
+
+function maskTaxId(value: string) {
+	const digits = onlyDigits(value).slice(0, 14);
+	if (digits.length <= 11) return digits.replace(/^(\d{3})(\d)/, "$1.$2").replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3").replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+	return digits.replace(/^(\d{2})(\d)/, "$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3").replace(/\.(\d{3})(\d)/, ".$1/$2").replace(/(\d{4})(\d{1,2})$/, "$1-$2");
+}
+
+function representationIssuer(record: RepresentationRecord) {
+	const relation = Array.isArray(record.nfse_issuers) ? record.nfse_issuers[0] : record.nfse_issuers;
+	return { taxId: record.tax_id || relation?.tax_id, legalName: record.legal_name || relation?.legal_name };
+}
+
+function RepresentationWorkspace({ data, onIssuerChange, refresh }: { data: Data; onIssuerChange: (id: string) => void; refresh: () => Promise<unknown> }) {
+	const [taxIdInput, setTaxIdInput] = useState("");
+	const [candidate, setCandidate] = useState<Item | null>(null);
+	const [representations, setRepresentations] = useState<RepresentationRecord[]>([]);
+	const [password, setPassword] = useState("");
+	const [recoveryEmail, setRecoveryEmail] = useState("");
+	const [officialAuthorization, setOfficialAuthorization] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [lookupBusy, setLookupBusy] = useState(false);
+	const [feedback, setFeedback] = useState("");
+	const [companyDraft, setCompanyDraft] = useState<RepresentedCompanyDraft | null>(null);
+
+	const loadRepresentations = useCallback(async () => {
+		const response = await fetch("/api/nfse/representations", { cache: "no-store" });
+		if (!response.ok) return;
+		const body = await response.json();
+		setRepresentations(body.representations || []);
+	}, []);
+	useEffect(() => { void loadRepresentations(); }, [loadRepresentations]);
+
+	async function locate(raw = taxIdInput) {
+		setFeedback("");
+		setCompanyDraft(null);
+		const digits = onlyDigits(raw);
+		if (digits.length !== 11 && digits.length !== 14) return setFeedback("Informe um CPF ou CNPJ válido.");
+		const found = data.issuers.find((item) => onlyDigits(item.tax_id) === digits);
+		if (found) {
+			setCandidate(found);
+			onIssuerChange(found.id);
+			setTaxIdInput(formatTaxId(found.tax_id));
+			return;
+		}
+		if (digits.length !== 14) return setFeedback("O cadastro automático está disponível para CNPJ. O suporte fiscal a emitentes pessoa física depende do município.");
+		setLookupBusy(true);
+		try {
+			const response = await fetch(`/api/nfse/company-lookup?cnpj=${digits}`, { cache: "no-store" });
+			const body = await response.json();
+			setCompanyDraft({ taxId: digits, legalName: body.legalName || "", municipalityIbge: body.municipalityIbge || "", municipalityName: body.municipalityName || "", uf: body.uf || "", simpleNationalOption: body.simpleNationalOption || "1", simpleNationalTaxationRegime: "1", specialTaxRegime: "0", dpsSeries: "1" });
+			setFeedback(response.ok ? "Confira os dados fiscais encontrados antes de continuar." : body.error || "Complete os dados fiscais para cadastrar a empresa.");
+		} catch { setCompanyDraft({ taxId: digits, legalName: "", municipalityIbge: "", simpleNationalOption: "1", simpleNationalTaxationRegime: "1", specialTaxRegime: "0", dpsSeries: "1" }); setFeedback("Não foi possível consultar os dados agora. Preencha os campos abaixo."); }
+		finally { setLookupBusy(false); }
+	}
+
+	async function registerRepresentedCompany(event: React.FormEvent<HTMLFormElement>) {
+		event.preventDefault();
+		if (!companyDraft || busy) return;
+		setBusy(true); setFeedback("");
+		try {
+			const response = await fetch("/api/nfse/workspace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "issuer", taxId: companyDraft.taxId, legalName: companyDraft.legalName, municipalityIbge: companyDraft.municipalityIbge, taxRegime: companyDraft.simpleNationalOption === "1" ? "Regime normal" : "Simples Nacional", simpleNationalOption: companyDraft.simpleNationalOption, simpleNationalTaxationRegime: companyDraft.simpleNationalTaxationRegime, specialTaxRegime: companyDraft.specialTaxRegime, dpsSeries: companyDraft.dpsSeries }) });
+			const body = await response.json();
+			if (!response.ok) throw new Error(body.error || "Não foi possível cadastrar a empresa representada.");
+			const registered = { id: body.id, tax_id: companyDraft.taxId, legal_name: companyDraft.legalName };
+			setCandidate(registered); setCompanyDraft(null); onIssuerChange(body.id);
+			setFeedback("Empresa cadastrada. Agora confirme a autorização e defina a senha inicial do cliente.");
+			await refresh();
+		} catch (error) { setFeedback(error instanceof Error ? error.message : "Não foi possível cadastrar a empresa."); }
+		finally { setBusy(false); }
+	}
+
+	async function confirmRepresentation(event: React.FormEvent<HTMLFormElement>) {
+		event.preventDefault();
+		if (!candidate || busy) return;
+		if (!officialAuthorization) return setFeedback("Confirme que a autorização já está válida no ambiente oficial da NFS-e.");
+		if (password.length < 8) return setFeedback("A senha inicial deve ter pelo menos 8 caracteres.");
+		const representativeCertificate = data.certificates.find((item) => item.status === "active" && onlyDigits(item.subject_tax_id) !== onlyDigits(candidate.tax_id));
+		if (!representativeCertificate) return setFeedback("Não há certificado ativo do escritório disponível para representar esta empresa.");
+		setBusy(true); setFeedback("");
+		try {
+			const representationResponse = await fetch("/api/nfse/representations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ issuerId: candidate.id, certificateId: representativeCertificate.id, authorizationType: "electronic_power_of_attorney", allowClientIssuance: true, allowCancellation: false }) });
+			const representationBody = await representationResponse.json();
+			if (!representationResponse.ok) throw new Error(representationBody.error || "Não foi possível cadastrar a representação.");
+			const accountResponse = await fetch("/api/nfse/representations/client-account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ issuerId: candidate.id, name: candidate.legal_name, password, recoveryEmail: recoveryEmail || null }) });
+			const accountBody = await accountResponse.json();
+			if (!accountResponse.ok && accountResponse.status !== 409) throw new Error(accountBody.error || "Não foi possível criar o acesso do cliente.");
+			setFeedback(accountResponse.ok ? `Representação configurada. O login do cliente é ${formatTaxId(accountBody.loginTaxId)}.` : `Representação configurada. ${accountBody.error}`);
+			setPassword(""); setOfficialAuthorization(false);
+			await Promise.all([loadRepresentations(), refresh()]);
+		} catch (error) { setFeedback(error instanceof Error ? error.message : "Não foi possível concluir a configuração."); }
+		finally { setBusy(false); }
+	}
+
+	return <>
+		<PageTitle title="Representação" text="Acesse e configure empresas autorizadas para emissão de NFS-e." />
+		<section className="card nfse-card full nfse-representation-shell">
+			<h2>Representar</h2>
+			<div className="nfse-representation-info">Se você já possui autorização para usar o Sistema Nacional da NFS-e em nome de outra pessoa física ou jurídica, informe o CPF/CNPJ abaixo. A procuração eletrônica ou representação legal precisa estar válida no ambiente oficial.</div>
+			<label className="nfse-representation-taxid">CPF/CNPJ que deseja representar *
+				<div><input value={taxIdInput} onChange={(event) => { setTaxIdInput(maskTaxId(event.target.value)); setCandidate(null); setCompanyDraft(null); }} inputMode="numeric" placeholder="00.000.000/0000-00" maxLength={18} />
+				<button type="button" disabled={lookupBusy} onClick={() => void locate()}>{lookupBusy ? <LoaderCircle className="nfse-spinner" size={18} /> : <LogIn size={18} />} {lookupBusy ? "Consultando…" : "Representar"}</button></div>
+			</label>
+			{companyDraft && <form className="nfse-representation-onboarding" onSubmit={registerRepresentedCompany}>
+				<div className="nfse-represented-company"><UserRoundPlus size={26} /><div><small>Novo emitente representado</small><strong>{formatTaxId(companyDraft.taxId)}</strong><span>Confira os dados necessários para a emissão fiscal.</span></div></div>
+				<div className="nfse-onboarding-grid">
+					<label className="wide">Razão social *<input value={companyDraft.legalName} onChange={(event) => setCompanyDraft({ ...companyDraft, legalName: event.target.value })} required /></label>
+					<label>Município IBGE *<input value={companyDraft.municipalityIbge} onChange={(event) => setCompanyDraft({ ...companyDraft, municipalityIbge: onlyDigits(event.target.value).slice(0, 7) })} inputMode="numeric" pattern="\d{7}" required />{companyDraft.municipalityName && <small>{companyDraft.municipalityName}/{companyDraft.uf}</small>}</label>
+					<label>Opção pelo Simples *<select value={companyDraft.simpleNationalOption} onChange={(event) => setCompanyDraft({ ...companyDraft, simpleNationalOption: event.target.value as RepresentedCompanyDraft["simpleNationalOption"] })}><option value="1">Não optante</option><option value="2">Optante - MEI</option><option value="3">Optante - ME/EPP</option></select></label>
+					<label>Apuração do Simples *<select value={companyDraft.simpleNationalTaxationRegime} onChange={(event) => setCompanyDraft({ ...companyDraft, simpleNationalTaxationRegime: event.target.value as "1" | "2" })}><option value="1">Tributos federais e ISS pelo Simples</option><option value="2">Tributos federais pelo Simples e ISS pela NFS-e</option></select></label>
+					<label>Regime especial *<select value={companyDraft.specialTaxRegime} onChange={(event) => setCompanyDraft({ ...companyDraft, specialTaxRegime: event.target.value })}><option value="0">Nenhum</option><option value="1">Microempresa municipal</option><option value="2">Estimativa</option><option value="3">Sociedade de profissionais</option><option value="4">Cooperativa</option><option value="5">MEI</option><option value="6">ME/EPP</option></select></label>
+					<label>Série DPS *<input value={companyDraft.dpsSeries} onChange={(event) => setCompanyDraft({ ...companyDraft, dpsSeries: event.target.value.replace(/[^A-Za-z0-9]/g, "").slice(0, 5) })} required /></label>
+				</div>
+				<button disabled={busy}>{busy ? "Cadastrando…" : "Cadastrar e continuar"}</button>
+			</form>}
+			{candidate && <form className="nfse-representation-confirm" onSubmit={confirmRepresentation}>
+				<div className="nfse-represented-company"><Handshake size={26} /><div><small>Empresa localizada</small><strong>{candidate.legal_name}</strong><span>{formatTaxId(candidate.tax_id)}</span></div></div>
+				<label className="nfse-official-confirm"><input type="checkbox" checked={officialAuthorization} onChange={(event) => setOfficialAuthorization(event.target.checked)} /> <span>Confirmo que a procuração eletrônica ou representação legal já está válida no ambiente oficial da NFS-e.</span></label>
+				<div className="nfse-client-access"><h3>Acesso do cliente representado</h3><p>O nome será <b>{candidate.legal_name}</b> e o login será o CNPJ acima. Defina somente a senha inicial.</p>
+					<label>Senha inicial *<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} autoComplete="new-password" required /></label>
+					<label>E-mail de recuperação <small>Opcional</small><input type="email" value={recoveryEmail} onChange={(event) => setRecoveryEmail(event.target.value)} /></label>
+				</div>
+				<button disabled={busy}>{busy ? "Configurando…" : "Confirmar representação e criar acesso"}</button>
+			</form>}
+			{feedback && <div className="nfse-inline-feedback" role="status">{feedback}</div>}
+			<div className="nfse-recent-representations"><h2>Representações recentes</h2>
+				{representations.length ? representations.map((record) => { const represented = representationIssuer(record); return <div className="nfse-recent-representation" key={record.id}><UserRound size={25} /><div><strong>{represented.legalName || "Empresa representada"}</strong><span>{formatTaxId(represented.taxId)}</span></div><button type="button" title="Representar esta empresa" onClick={() => { const item = data.issuers.find((issuer) => issuer.id === record.issuer_id); if (item) { setCandidate(item); setTaxIdInput(formatTaxId(item.tax_id)); onIssuerChange(item.id); } }}><LogIn size={21} /></button></div>; }) : <p className="nfse-empty">Nenhuma representação cadastrada.</p>}
+			</div>
+		</section>
+	</>;
+}
+
+function CertificateSettingsSimple({ issuer, cert, setMessage, refresh }: { issuer?: Item; cert?: Item; setMessage: (message: string) => void; refresh: () => Promise<unknown> }) {
+	const [uploading, setUploading] = useState(false);
+	const [feedback, setFeedback] = useState("");
+	const [identifierBusy, setIdentifierBusy] = useState(false);
+	return <><PageTitle title="Configurações" text="Certificado digital e acesso do escritório." /><section className="card nfse-card full"><h2>Certificado A1</h2>
+		{cert && <div className="nfse-certificate"><ShieldCheck /><div><b>Certificado ativo</b><p>Titular: {formatTaxId(cert.subject_tax_id)}</p><p>Válido até {new Date(cert.not_after || "").toLocaleDateString("pt-BR")}</p></div><span className="badge green">Válido</span></div>}
+		{issuer ? <form onSubmit={async (event) => { event.preventDefault(); if (uploading) return; setUploading(true); setFeedback(""); setMessage(""); const form = event.currentTarget; try { const response = await fetch("/api/nfse/certificates", { method: "POST", body: new FormData(form) }); const body = await response.json(); setFeedback(response.ok ? "Certificado armazenado com segurança." : body.error || "Não foi possível adicionar o certificado."); if (response.ok) { form.reset(); await refresh(); } } catch { setFeedback("Falha de comunicação durante o envio."); } finally { setUploading(false); } }}><input type="hidden" name="issuerId" value={issuer.id} /><input name="certificate" type="file" accept=".pfx,.p12" required /><input name="password" type="password" required placeholder="Senha do certificado" />{feedback && <div className="nfse-inline-feedback" role="status">{feedback}</div>}<button disabled={uploading}>{uploading ? "Validando certificado…" : cert ? "Substituir certificado" : "Adicionar certificado"}</button></form> : <p className="nfse-empty">Selecione uma empresa emissora.</p>}
+	</section><section className="card nfse-card full"><h2>CPF/CNPJ de acesso do escritório</h2><p className="hint">Identificador usado pelo escritório para entrar na Helians.</p><form onSubmit={async (event) => { event.preventDefault(); if (identifierBusy) return; setIdentifierBusy(true); const values = new FormData(event.currentTarget); try { const response = await fetch("/api/auth/account-identifier", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taxId: values.get("taxId") }) }); const body = await response.json(); setMessage(response.ok ? `Acesso ativado para ${formatTaxId(body.loginTaxId)}.` : body.error || "Não foi possível ativar o identificador."); } finally { setIdentifierBusy(false); } }}><label>CPF/CNPJ do titular *<input name="taxId" inputMode="numeric" placeholder="00.000.000/0000-00" required /></label><button disabled={identifierBusy}>{identifierBusy ? "Confirmando…" : "Ativar acesso"}</button></form></section></>;
+}
+
 function CertificateSettings({
 	data,
 	issuer,

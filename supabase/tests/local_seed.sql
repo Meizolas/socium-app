@@ -11,6 +11,12 @@ insert into profiles(id,office_id,name,role,onboarding_step) values
  ('10000000-0000-4000-8000-000000000003','11000000-0000-4000-8000-000000000001','Operador NFS-e Local','operator','ready'),
  ('30000000-0000-4000-8000-000000000003','33000000-0000-4000-8000-000000000003','Usuário Sem Módulo','operator','ready'),
  ('20000000-0000-4000-8000-000000000002','22000000-0000-4000-8000-000000000002','Admin Isolado Local','admin','ready') on conflict(id) do nothing;
+insert into helians_accounts(auth_user_id,login_tax_id,account_type,status,activated_at) values
+ ('10000000-0000-4000-8000-000000000001','11222333000181','office','active',now()),
+ ('10000000-0000-4000-8000-000000000003','22333444000181','office','active',now()),
+ ('30000000-0000-4000-8000-000000000003','33444555000181','office','active',now()),
+ ('20000000-0000-4000-8000-000000000002','44555666000181','office','active',now())
+on conflict(auth_user_id) do update set login_tax_id=excluded.login_tax_id,status='active',updated_at=now();
 insert into office_modules(office_id,module,status,activated_at) values
  ('11000000-0000-4000-8000-000000000001','documentos','active',now()),
  ('11000000-0000-4000-8000-000000000001','nfse','active',now()),
