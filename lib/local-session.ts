@@ -48,15 +48,16 @@ export async function localContext(request: Request): Promise<AppContext> {
 		user_id: string;
 		office_id: string;
 		role: "admin" | "operator" | "client";
+		onboarding_step: string;
 		modules: string[];
 	}>(
-		`select u.id user_id,p.office_id,p.role,
+		`select u.id user_id,p.office_id,p.role,p.onboarding_step,
 		 coalesce(array_agg(om.module::text order by om.module::text)
 		 filter(where om.status='active' and coalesce(pma.allowed,true)),array[]::text[]) modules
 		 from auth.users u join profiles p on p.id=u.id
 		 left join office_modules om on om.office_id=p.office_id
 		 left join profile_module_access pma on pma.profile_id=p.id and pma.module=om.module
-		 where u.id=$1 group by u.id,p.office_id,p.role`,
+		 where u.id=$1 group by u.id,p.office_id,p.role,p.onboarding_step`,
 		[parsed.userId],
 	);
 	if (!result.rows[0])
@@ -81,6 +82,7 @@ export async function localContext(request: Request): Promise<AppContext> {
 		userId: row.user_id,
 		officeId: row.office_id,
 		role: row.role,
+		onboardingStep: row.onboarding_step,
 		effectiveModules: (row.role === "client" ? row.modules.filter((module) => module === "nfse") : row.modules) as AppContext["effectiveModules"],
 		issuerScope: clientIssuerId ? [clientIssuerId] : rules.length
 			? rules.filter((x) => x.allowed).map((x) => x.issuer_id)

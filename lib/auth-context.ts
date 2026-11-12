@@ -9,6 +9,7 @@ export type AppContext = {
 	userId: string;
 	officeId: string;
 	role: AppRole;
+	onboardingStep: string;
 	effectiveModules: AppModule[];
 	issuerScope: string[] | null;
 };
@@ -66,7 +67,7 @@ export async function requireAppContext(
 	const db = supabaseAdmin();
 	const profile = await db
 		.from("profiles")
-		.select("office_id,role")
+		.select("office_id,role,onboarding_step")
 		.eq("id", user.id)
 		.maybeSingle();
 	if (profile.error) throw new Error(profile.error.message);
@@ -113,6 +114,7 @@ export async function requireAppContext(
 		userId: user.id,
 		officeId: profileData.office_id,
 		role: profileData.role as AppRole,
+		onboardingStep: profileData.onboarding_step,
 		effectiveModules,
 		issuerScope: clientIssuerId ? [clientIssuerId] : issuerRules.length
 			? issuerRules.filter((x) => x.allowed).map((x) => x.issuer_id)
