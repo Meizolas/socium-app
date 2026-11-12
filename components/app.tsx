@@ -100,7 +100,8 @@ function Sidebar({
 }) {
   return (
     <aside>
-      <img className="logo" src="/api/logo" alt="Socium Contábil" />
+      <img className="logo logo-full" src="/api/logo?brand=helians-v1" alt="Helians" />
+      <img className="logo logo-icon" src="/api/logo?variant=icon&brand=helians-v1" alt="" aria-hidden="true" />
       <nav>
         {nav.map(([n, Icon]) => (
           <button

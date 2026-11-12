@@ -195,7 +195,8 @@ export function RealApp({ onOpenModules }: { onOpenModules: () => void }) {
   return (
     <div className={"app " + (collapsed ? "sidebar-collapsed" : "")}>
       <aside>
-        <img className="logo" src="/api/logo" alt="Socium Contábil" />
+        <img className="logo logo-full" src="/api/logo?brand=helians-v1" alt="Helians" />
+        <img className="logo logo-icon" src="/api/logo?variant=icon&brand=helians-v1" alt="" aria-hidden="true" />
         <nav>
           {nav.map(([name, Icon]) => (
             <button key={name} className={page === name ? "active" : ""} onClick={() => setPage(name)} title={collapsed ? name : undefined}>
@@ -315,7 +316,7 @@ function Header({
   return (
     <header>
       <div>
-		<button className="breadcrumb-home" onClick={onOpenModules}>Socium</button>
+		<button className="breadcrumb-home" onClick={onOpenModules}>Helians</button>
         <span>/</span>
         <strong>{moduleName}</strong>
         <span>/</span>

@@ -312,7 +312,8 @@ function Sidebar({ area, go, collapsed, setCollapsed }: { area: Area; go: (a: Ar
 	);
 	return (
 		<aside>
-			<img className="logo" src="/api/logo" alt="Socium Contábil" />
+			<img className="logo logo-full" src="/api/logo?brand=helians-v1" alt="Helians" />
+			<img className="logo logo-icon" src="/api/logo?variant=icon&brand=helians-v1" alt="" aria-hidden="true" />
 			<nav>
 				{item("overview", "Visão geral", Home)}
 				{item("issue", "Emitir NFS-e", FilePlus2)}
@@ -353,7 +354,7 @@ function Topbar({
 	return (
 		<header>
 			<div className="nfse-breadcrumb">
-				<button className="breadcrumb-home" type="button" onClick={onOpenModules}>Socium</button><span>/</span><strong>Emitir NFS-e</strong><span>/</span><b>{labels[area]}</b>
+				<button className="breadcrumb-home" type="button" onClick={onOpenModules}>Helians</button><span>/</span><strong>Emitir NFS-e</strong><span>/</span><b>{labels[area]}</b>
 			</div>
 			<div className="headright">
 				<label className="nfse-issuer-select">

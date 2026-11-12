@@ -1,2 +1,2 @@
 import {readFile} from 'fs/promises';import {join} from 'path';
-export async function GET(){const data=await readFile(join(process.cwd(),'assets','logo-socium.jpg'));return new Response(data,{headers:{'Content-Type':'image/jpeg','Cache-Control':'public, max-age=86400'}})}
+export async function GET(request:Request){const icon=new URL(request.url).searchParams.get('variant')==='icon',file=icon?'Icone Helians.png':'Logotipo helians preto e azul.png',data=await readFile(join(process.cwd(),'images',file));return new Response(data,{headers:{'Content-Type':'image/png','Cache-Control':'public, max-age=86400'}})}

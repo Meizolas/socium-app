@@ -1,4 +1,4 @@
-# Socium Contábil — Automação DAS
+# Helians — Plataforma contábil
 
 MVP em Next.js para importar PDFs DAS em lote, acompanhar o processamento e administrar clientes e alertas. A interface segue as referências visuais em `assets/` e inicia em modo demonstração, sem depender de serviços externos.
 

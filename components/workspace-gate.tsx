@@ -29,7 +29,7 @@ export function WorkspaceGate() {
 		: <RealApp onOpenModules={() => setSelectedModule(null)} />;
 }
 function ModuleHub({ modules, onSelect }: { modules: Module[]; onSelect: (module: Module) => void }) {
-	return <main className="module-hub"><section><img src="/api/logo" alt="Socium Contábil" /><div className="module-hub-title"><small>Plataforma Socium</small><h1>Escolha um módulo</h1><p>Selecione o que deseja fazer. Cada módulo mantém suas próprias ferramentas e navegação.</p></div><div className="module-hub-grid">
+	return <main className="module-hub"><section><img src="/api/logo?brand=helians-v1" alt="Helians" /><div className="module-hub-title"><small>Plataforma Helians</small><h1>Escolha um módulo</h1><p>Selecione o que deseja fazer. Cada módulo mantém suas próprias ferramentas e navegação.</p></div><div className="module-hub-grid">
 		{modules.includes("nfse") && <button type="button" onClick={() => onSelect("nfse")}><i><FileText size={38} /></i><span><b>Emitir NFS-e</b><small>Emita, acompanhe e gerencie notas fiscais de serviço.</small></span><em>Acessar módulo →</em></button>}
 		{modules.includes("documentos") && <button type="button" onClick={() => onSelect("documentos")}><i><Files size={38} /></i><span><b>Importar Guias</b><small>Importe, organize e envie guias para seus clientes.</small></span><em>Acessar módulo →</em></button>}
 	</div><Logout /></section></main>;
