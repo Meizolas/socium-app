@@ -69,6 +69,7 @@ type Data = {
 	takers: Item[];
 	invoices: Item[];
 	certificates: Item[];
+	signingReadyIssuerIds?: string[];
 };
 type Draft = {
 	takerId: string;
@@ -152,7 +153,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 			const r = await fetch("/api/nfse/workspace", { cache: "no-store" }), b = await r.json();
 			if (!r.ok) { setMessage(b.error || "Não foi possível atualizar os dados."); return false; }
 			setData(b); setIssuerId((current) => current || b.issuers[0]?.id || "");
-			if (first.current) { first.current = false; if (!b.issuers.length || !b.services.length || !b.certificates.some((x: Item) => x.status === "active")) setArea("setup"); }
+			if (first.current) { first.current = false; if (!b.issuers.length || !b.services.length || (!b.certificates.some((x: Item) => x.status === "active") && !b.signingReadyIssuerIds?.length)) setArea("setup"); }
 			return true;
 		} catch { setMessage("Não foi possível atualizar os dados agora. Tente novamente."); return false; }
 	}, []);
@@ -196,7 +197,9 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 		invoices = data.invoices.filter(
 			(x) => !issuer || x.issuer_id === issuer.id,
 		),
-		ready = Boolean(issuer && services.length && cert),
+		signingReady = Boolean(cert || (issuer && data.signingReadyIssuerIds?.includes(issuer.id))),
+		effectiveCert = cert || (signingReady ? { id: "representation", status: "active", subject_tax_id: "Representante autorizado" } : undefined),
+		ready = Boolean(issuer && services.length && signingReady),
 		simulation = data.simulation,
 		production = data.environment === "government_production";
 	async function saveDraft(enqueue = false) {
@@ -277,7 +280,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 							issuer={issuer}
 							takers={takers}
 							services={services}
-							cert={cert}
+							cert={effectiveCert}
 							saveDraft={saveDraft}
 							result={invoices.find((x) => x.id === resultId)}
 							refresh={load}
@@ -292,6 +295,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 					)}{" "}
 					{area === "settings" && (
 						<CertificateSettings
+							data={data}
 							issuer={issuer}
 							cert={cert}
 							setMessage={setMessage}
@@ -996,17 +1000,21 @@ function Registrations({
 	);
 }
 function CertificateSettings({
+	data,
 	issuer,
 	cert,
 	setMessage,
 	refresh,
 }: {
+	data: Data;
 	issuer?: Item;
 	cert?: Item;
 	setMessage: (m: string) => void;
 	refresh: () => Promise<unknown>;
 }) {
 	const [uploading, setUploading] = useState(false),
+		[representationBusy, setRepresentationBusy] = useState(false),
+		[representationFeedback, setRepresentationFeedback] = useState(""),
 		[uploadFeedback, setUploadFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 	return (
 		<>
@@ -1070,6 +1078,46 @@ function CertificateSettings({
 				) : (
 					<p className="nfse-empty">Selecione uma empresa emissora.</p>
 				)}
+			</section>
+			<section className="card nfse-card full">
+				<h2>CPF/CNPJ de acesso do escritório</h2>
+				<p className="hint">Depois de confirmar, este identificador poderá ser usado no login. Ele precisa pertencer a um certificado ativo do escritório.</p>
+				<form onSubmit={async (event) => { event.preventDefault(); setRepresentationBusy(true); setRepresentationFeedback(""); const values=new FormData(event.currentTarget); const response=await fetch("/api/auth/account-identifier",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({taxId:values.get("taxId")})}); const body=await response.json(); setRepresentationFeedback(response.ok?`Login por CPF/CNPJ ativado: ${body.loginTaxId}`:body.error||"Não foi possível ativar o identificador."); setRepresentationBusy(false); }}>
+					<label>CPF/CNPJ do titular *<input name="taxId" inputMode="numeric" required placeholder="Somente números ou formatado" /></label>
+					<button disabled={representationBusy}>{representationBusy ? "Confirmando…" : "Ativar login por CPF/CNPJ"}</button>
+				</form>
+			</section>
+			<section className="card nfse-card full">
+				<h2>Procuração e representação</h2>
+				<p className="hint">Autorize o uso do certificado do escritório para uma empresa representada. A procuração eletrônica também precisa estar válida no ambiente oficial da NFS-e.</p>
+				{data.certificates.some((item) => item.status === "active") ? <form onSubmit={async (event) => {
+					event.preventDefault(); setRepresentationBusy(true); setRepresentationFeedback("");
+					const values = new FormData(event.currentTarget);
+					const response = await fetch("/api/nfse/representations", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ issuerId:values.get("issuerId"), certificateId:values.get("certificateId"), authorizationType:"electronic_power_of_attorney", allowClientIssuance:values.get("allowClientIssuance")==="on", allowCancellation:false }) });
+					const body = await response.json(); setRepresentationFeedback(response.ok ? "Representação ativada. O certificado do escritório poderá assinar por esta empresa." : body.error || "Não foi possível cadastrar a representação.");
+					if (response.ok) await refresh(); setRepresentationBusy(false);
+				}}>
+					<label>Empresa representada *<select name="issuerId" defaultValue={issuer?.id || ""} required><option value="" disabled>Selecione o CNPJ representado</option>{data.issuers.map((item) => <option key={item.id} value={item.id}>{item.legal_name} - {item.tax_id}</option>)}</select></label>
+					<label>Certificado do representante *<select name="certificateId" required><option value="">Selecione o certificado</option>{data.certificates.filter((item) => item.status === "active").map((item) => <option key={item.id} value={item.id}>{item.subject_tax_id} - válido até {new Date(item.not_after || "").toLocaleDateString("pt-BR")}</option>)}</select></label>
+					<label className="wide"><input name="allowClientIssuance" type="checkbox" /> Permitir que o cliente solicite emissões usando esta representação</label>
+					<button disabled={representationBusy}>{representationBusy ? "Salvando…" : "Cadastrar representação"}</button>
+				</form> : <p className="nfse-empty">Adicione primeiro o certificado A1 do escritório ou representante.</p>}
+				{representationFeedback && <div className="nfse-inline-feedback" role="status">{representationFeedback}</div>}
+			</section>
+			<section className="card nfse-card full">
+				<h2>Acesso do cliente representado</h2>
+				<p className="hint">Cria uma credencial própria. O cliente entrará com o CNPJ dele e uma senha separada; a senha do escritório nunca é compartilhada.</p>
+				<form onSubmit={async (event) => {
+					event.preventDefault(); setRepresentationBusy(true); setRepresentationFeedback(""); const target=event.currentTarget, values=new FormData(target);
+					const response=await fetch("/api/nfse/representations/client-account",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({issuerId:values.get("issuerId"),name:values.get("name"),password:values.get("password"),recoveryEmail:values.get("recoveryEmail")||null})});
+					const body=await response.json(); setRepresentationFeedback(response.ok?`Acesso criado. Login: ${body.loginTaxId}`:body.error||"Não foi possível criar o acesso."); if(response.ok)target.reset(); setRepresentationBusy(false);
+				}}>
+					<label>Empresa *<select name="issuerId" defaultValue={issuer?.id || ""} required><option value="" disabled>Selecione</option>{data.issuers.map((item)=><option key={item.id} value={item.id}>{item.legal_name} - {item.tax_id}</option>)}</select></label>
+					<label>Nome do usuário *<input name="name" minLength={2} required /></label>
+					<label>E-mail de recuperação <small>Opcional</small><input name="recoveryEmail" type="email" /></label>
+					<label>Senha inicial *<input name="password" type="password" minLength={8} required /></label>
+					<button disabled={representationBusy}>{representationBusy ? "Criando…" : "Criar acesso do cliente"}</button>
+				</form>
 			</section>
 		</>
 	);

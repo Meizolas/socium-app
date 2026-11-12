@@ -4,7 +4,7 @@ import { localMode } from "./local-db";
 import { localContext } from "./local-session";
 
 export type AppModule = "documentos" | "nfse";
-export type AppRole = "admin" | "operator";
+export type AppRole = "admin" | "operator" | "client";
 export type AppContext = {
 	userId: string;
 	officeId: string;
@@ -72,10 +72,11 @@ export async function requireAppContext(
 	if (profile.error) throw new Error(profile.error.message);
 	if (!profile.data)
 		throw new AuthError("Cadastro do escritório ainda não concluído.", 403);
+	const profileData = profile.data;
 	const modules = await db
 		.from("office_modules")
 		.select("module,status")
-		.eq("office_id", profile.data.office_id);
+		.eq("office_id", profileData.office_id);
 	const restrictions = await db
 		.from("profile_module_access")
 		.select("module,allowed")
@@ -87,6 +88,7 @@ export async function requireAppContext(
 	);
 	const effectiveModules = (modules.data || [])
 		.filter((x) => x.status === "active" && !denied.has(x.module))
+		.filter((x) => profileData.role !== "client" || x.module === "nfse")
 		.map((x) => x.module) as AppModule[];
 	const scope = await db
 		.from("nfse_profile_issuer_access")
@@ -94,12 +96,25 @@ export async function requireAppContext(
 		.eq("profile_id", user.id);
 	if (scope.error) throw new Error(scope.error.message);
 	const issuerRules = scope.data || [];
+	let clientIssuerId: string | null = null;
+	if (profileData.role === "client") {
+		const account = await db
+			.from("helians_accounts")
+			.select("issuer_id,status")
+			.eq("auth_user_id", user.id)
+			.eq("account_type", "client")
+			.maybeSingle();
+		if (account.error) throw new Error(account.error.message);
+		if (!account.data || account.data.status !== "active" || !account.data.issuer_id)
+			throw new AuthError("Conta do cliente sem emitente ativo.", 403);
+		clientIssuerId = account.data.issuer_id;
+	}
 	const context: AppContext = {
 		userId: user.id,
-		officeId: profile.data.office_id,
-		role: profile.data.role as AppRole,
+		officeId: profileData.office_id,
+		role: profileData.role as AppRole,
 		effectiveModules,
-		issuerScope: issuerRules.length
+		issuerScope: clientIssuerId ? [clientIssuerId] : issuerRules.length
 			? issuerRules.filter((x) => x.allowed).map((x) => x.issuer_id)
 			: null,
 	};

@@ -107,15 +107,15 @@ class GovernmentRuntime:
   else:
    with psycopg.connect(self.db,row_factory=psycopg.rows.dict_row) as conn:
     if job['kind']=='issue':
-     record=conn.execute("select i.*,c.custody_reference from nfse_invoices i join profiles p on p.id=i.created_by and p.office_id=i.office_id and p.role in ('admin','operator') join office_modules m on m.office_id=i.office_id and m.module='nfse' and m.status='active' join nfse_certificates c on c.issuer_id=i.issuer_id and c.status='active' where i.id=%s and (not exists(select 1 from nfse_profile_issuer_access r where r.profile_id=p.id) or exists(select 1 from nfse_profile_issuer_access r where r.profile_id=p.id and r.issuer_id=i.issuer_id and r.allowed))",(job['invoice_id'],)).fetchone()
+     record=conn.execute("select i.*,c.custody_reference,c.issuer_id custody_aad_issuer_id,c.id signing_certificate_id from nfse_invoices i join profiles p on p.id=i.created_by and p.office_id=i.office_id and p.role in ('admin','operator','client') join office_modules m on m.office_id=i.office_id and m.module='nfse' and m.status='active' join nfse_certificates c on c.id=active_nfse_certificate(i) where i.id=%s and can_access_nfse_issuer_for_profile(p.id,i.issuer_id)",(job['invoice_id'],)).fetchone()
     else:
-     record=conn.execute("select i.*,c.custody_reference from nfse_invoices i join nfse_certificates c on c.issuer_id=i.issuer_id and c.status='active' where i.id=%s and i.status in ('unknown','reconciling','persistence_pending')",(job['invoice_id'],)).fetchone()
+     record=conn.execute("select i.*,c.custody_reference,c.issuer_id custody_aad_issuer_id,c.id signing_certificate_id from nfse_invoices i join nfse_certificates c on c.id=active_nfse_certificate(i) where i.id=%s and i.status in ('unknown','reconciling','persistence_pending')",(job['invoice_id'],)).fetchone()
   if not record:
    self.finish(job,'cancelled',b'',None);return
   if job['kind']=='issue':self.issue(job,record)
   else:self.reconcile(job,record)
  def certificate_context(self,invoice:dict):
-  aad=f"{invoice['office_id']}:{invoice['issuer_id']}:v1";secret=decrypt_envelope(self.storage.read_custody(invoice['custody_reference']),aad);key,cert,chain=pkcs12.load_key_and_certificates(base64.b64decode(secret['pfx']),secret['password'].encode());
+  custody_issuer=invoice.get('custody_aad_issuer_id') or invoice['issuer_id'];aad=f"{invoice['office_id']}:{custody_issuer}:v1";secret=decrypt_envelope(self.storage.read_custody(invoice['custody_reference']),aad);key,cert,chain=pkcs12.load_key_and_certificates(base64.b64decode(secret['pfx']),secret['password'].encode());
   if key is None or cert is None:raise RuntimeError('Certificado de custódia inválido.')
   temp=tempfile.TemporaryDirectory(prefix='socium-nfse-');pem=Path(temp.name)/'client.pem';pem.write_bytes(key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption())+cert.public_bytes(serialization.Encoding.PEM)+b''.join(x.public_bytes(serialization.Encoding.PEM) for x in (chain or [])));os.chmod(pem,0o600);context=ssl.create_default_context();context.load_cert_chain(str(pem));return temp,context,key,cert
  def issue(self,job:dict,invoice:dict)->None:

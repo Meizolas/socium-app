@@ -83,7 +83,7 @@ export async function GET(request: Request) {
 		const c = await requireAppContext(request, "nfse");
 		if (!localMode()) return remoteWorkspace(c);
 		const
-			[issuers, services, takers, invoices, certificates] = await Promise.all([
+			[issuers, services, takers, invoices, certificates, representations] = await Promise.all([
 				localQuery(
 					"select id,tax_id,legal_name,enabled from nfse_issuers where office_id=$1 order by legal_name",
 					[c.officeId],
@@ -104,6 +104,10 @@ export async function GET(request: Request) {
 					"select id,issuer_id,fingerprint_sha256,subject_tax_id,not_before,not_after,status from nfse_certificates where office_id=$1 order by created_at desc",
 					[c.officeId],
 				),
+				localQuery(
+					"select issuer_id from nfse_representations where office_id=$1 and status='active' and valid_from<=now() and (valid_until is null or valid_until>now())",
+					[c.officeId],
+				),
 			]),
 			allowed = (issuerId: string) =>
 				c.issuerScope === null || c.issuerScope.includes(issuerId);
@@ -116,6 +120,7 @@ export async function GET(request: Request) {
 			certificates: certificates.rows.filter((x) =>
 				allowed(String(x.issuer_id)),
 			),
+			signingReadyIssuerIds: representations.rows.map((x) => String(x.issuer_id)).filter(allowed),
 		});
 	} catch (error) {
 		return authError(error);
@@ -123,7 +128,7 @@ export async function GET(request: Request) {
 }
 export async function POST(request: Request) {
 	try {
-		const c = await requireAppContext(request, "nfse", ["admin", "operator"]),
+		const c = await requireAppContext(request, "nfse", ["admin", "operator", "client"]),
 			parsed = actions.safeParse(await request.json());
 		if (!parsed.success)
 			return Response.json(
@@ -171,7 +176,7 @@ export async function POST(request: Request) {
 			return Response.json(r.rows[0], { status: 201 });
 		}
 		if (x.action === "taker") {
-			if (c.role !== "admin")
+			if (c.role !== "admin" && c.role !== "client")
 				return Response.json(
 					{ error: "Papel sem permissão para esta operação." },
 					{ status: 403 },
@@ -226,14 +231,16 @@ async function remoteWorkspace(c: Awaited<ReturnType<typeof requireAppContext>>)
 	let takersQuery = db.from("nfse_takers").select("id,issuer_id,tax_id,legal_name,email,address").eq("office_id", c.officeId).order("legal_name");
 	let invoicesQuery = db.from("nfse_invoices").select("id,issuer_id,taker_id,service_profile_id,status,competence,amount,description,official_key,simulation_reference,created_at").eq("office_id", c.officeId).order("created_at", { ascending: false });
 	let certificatesQuery = db.from("nfse_certificates").select("id,issuer_id,fingerprint_sha256,subject_tax_id,not_before,not_after,status").eq("office_id", c.officeId).order("created_at", { ascending: false });
+	let representationsQuery = db.from("nfse_representations").select("issuer_id").eq("office_id", c.officeId).eq("status", "active").lte("valid_from", new Date().toISOString()).or(`valid_until.is.null,valid_until.gt.${new Date().toISOString()}`);
 	if (c.issuerScope) {
 		const scope = c.issuerScope.length ? c.issuerScope : ["00000000-0000-0000-0000-000000000000"];
 		issuersQuery = issuersQuery.in("id", scope);servicesQuery = servicesQuery.in("issuer_id", scope);takersQuery = takersQuery.in("issuer_id", scope);invoicesQuery = invoicesQuery.in("issuer_id", scope);certificatesQuery = certificatesQuery.in("issuer_id", scope);
 	}
-	const [issuers, services, takers, invoices, certificates] = await Promise.all([issuersQuery, servicesQuery, takersQuery, invoicesQuery, certificatesQuery]);
-	const failed = [issuers, services, takers, invoices, certificates].find((result) => result.error);
+	if (c.issuerScope) representationsQuery = representationsQuery.in("issuer_id", c.issuerScope.length ? c.issuerScope : ["00000000-0000-0000-0000-000000000000"]);
+	const [issuers, services, takers, invoices, certificates, representations] = await Promise.all([issuersQuery, servicesQuery, takersQuery, invoicesQuery, certificatesQuery, representationsQuery]);
+	const failed = [issuers, services, takers, invoices, certificates, representations].find((result) => result.error);
 	if (failed?.error) throw new Error(failed.error.message);
-	return Response.json({ simulation: false, environment: fiscalEnvironment() === 1 ? "government_production" : "government_homologation", issuers: issuers.data, services: services.data, takers: takers.data, invoices: invoices.data, certificates: certificates.data });
+	return Response.json({ simulation: false, environment: fiscalEnvironment() === 1 ? "government_production" : "government_homologation", issuers: issuers.data, services: services.data, takers: takers.data, invoices: invoices.data, certificates: certificates.data, signingReadyIssuerIds: (representations.data || []).map((x) => x.issuer_id) });
 }
 
 async function remoteMutation(c: Awaited<ReturnType<typeof requireAppContext>>, x: z.infer<typeof actions>) {
@@ -244,6 +251,14 @@ async function remoteMutation(c: Awaited<ReturnType<typeof requireAppContext>>, 
 		if (r.error) throw new Error(r.error.message);return Response.json(r.data, { status: 201 });
 	}
 	requireIssuer(c, x.issuerId);
+	if (x.action === "taker" && c.role === "client") {
+		const issuer = await db.from("nfse_issuers").select("id").eq("id", x.issuerId).eq("office_id", c.officeId).maybeSingle();
+		if (issuer.error) throw new Error(issuer.error.message);
+		if (!issuer.data) return Response.json({ error: "Emitente não encontrado." }, { status: 404 });
+		const savedTaker = await db.from("nfse_takers").upsert({ office_id: c.officeId, issuer_id: x.issuerId, tax_id: x.taxId, legal_name: x.legalName, email: x.email || null }, { onConflict: "issuer_id,tax_id" }).select("id").single();
+		if (savedTaker.error) throw new Error(savedTaker.error.message);
+		return Response.json(savedTaker.data, { status: 201 });
+	}
 	if (x.action === "service" || x.action === "taker") {
 		if (c.role !== "admin") return Response.json({ error: "Papel sem permissão para esta operação." }, { status: 403 });
 		const issuer = await db.from("nfse_issuers").select("id").eq("id", x.issuerId).eq("office_id", c.officeId).maybeSingle();

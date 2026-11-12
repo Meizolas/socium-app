@@ -47,7 +47,7 @@ export async function localContext(request: Request): Promise<AppContext> {
 	const result = await localQuery<{
 		user_id: string;
 		office_id: string;
-		role: "admin" | "operator";
+		role: "admin" | "operator" | "client";
 		modules: string[];
 	}>(
 		`select u.id user_id,p.office_id,p.role,
@@ -67,12 +67,22 @@ export async function localContext(request: Request): Promise<AppContext> {
 			[parsed.userId],
 		),
 		rules = scope.rows;
+	let clientIssuerId: string | null = null;
+	if (row.role === "client") {
+		const account = await localQuery<{ issuer_id: string }>(
+			"select issuer_id from helians_accounts where auth_user_id=$1 and account_type='client' and status='active'",
+			[parsed.userId],
+		);
+		if (!account.rows[0]?.issuer_id)
+			throw Object.assign(new Error("Conta do cliente sem emitente ativo."), { status: 403 });
+		clientIssuerId = account.rows[0].issuer_id;
+	}
 	return {
 		userId: row.user_id,
 		officeId: row.office_id,
 		role: row.role,
-		effectiveModules: row.modules as AppContext["effectiveModules"],
-		issuerScope: rules.length
+		effectiveModules: (row.role === "client" ? row.modules.filter((module) => module === "nfse") : row.modules) as AppContext["effectiveModules"],
+		issuerScope: clientIssuerId ? [clientIssuerId] : rules.length
 			? rules.filter((x) => x.allowed).map((x) => x.issuer_id)
 			: null,
 	};
