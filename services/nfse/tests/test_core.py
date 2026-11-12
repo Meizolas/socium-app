@@ -36,4 +36,7 @@ class CoreTest(unittest.TestCase):
  def test_formatted_national_service_code_is_normalized(self):
   data=NationalDpsData(issuer_tax_id='19463142000113',issuer_municipality='2933307',taker_tax_id='25101960000179',taker_name='Tomador',competence='2026-11-12',amount=Decimal('100.00'),description='Teste',series='1',number=2,national_code='07.13.01',service_municipality='2933307',nbs_code='1.1803.21.00',environment=1)
   raw=build_national_dps(data,datetime(2026,11,12,12,0,tzinfo=timezone(timedelta(hours=-3))));root=Path(__file__).parents[3];validate_xsd(raw,str(root/'teste_nfse'/'esquemas_xsd'/'DPS_v1.01.xsd'));self.assertIn(b'<cTribNac>071301</cTribNac>',raw);self.assertIn(b'<cNBS>118032100</cNBS>',raw)
+ def test_substitution_group_validates_against_official_xsd(self):
+  data=NationalDpsData(issuer_tax_id='19463142000113',issuer_municipality='2933307',taker_tax_id='42057096000174',taker_name='TOMADOR SINTETICO LTDA',competence='2026-11-12',amount=Decimal('10.00'),description='Correcao de servico',series='1',number=3,national_code='171901',service_municipality='2933307',substitution_key='1'*50,substitution_reason_code='99',substitution_reason='Correcao dos dados fiscais da nota anterior')
+  raw=build_national_dps(data,datetime(2026,11,12,12,0,tzinfo=timezone(timedelta(hours=-3))));root=Path(__file__).parents[3];validate_xsd(raw,str(root/'teste_nfse'/'esquemas_xsd'/'DPS_v1.01.xsd'));self.assertIn(b'<subst><chSubstda>'+b'1'*50+b'</chSubstda><cMotivo>99</cMotivo>',raw)
 if __name__=='__main__':unittest.main()

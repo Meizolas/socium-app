@@ -76,6 +76,9 @@ const actions = z.discriminatedUnion("action", [
 		pisRetention: z.string().regex(/^\d+\.\d{2}$/),
 		cofinsRetention: z.string().regex(/^\d+\.\d{2}$/),
 		csllRetention: z.string().regex(/^\d+\.\d{2}$/),
+		substitutionInvoiceId: z.union([uuid,z.literal("")]).transform(value=>value||undefined),
+		substitutionReasonCode: z.enum(["01","02","03","04","05","99"]).optional(),
+		substitutionReason: z.string().trim().max(255).optional(),
 	}),
 ]);
 export async function GET(request: Request) {
@@ -97,7 +100,7 @@ export async function GET(request: Request) {
 					[c.officeId],
 				),
 				localQuery(
-					"select id,issuer_id,taker_id,service_profile_id,status,competence,amount,description,official_key,simulation_reference,cancellation_status,cancelled_at,cancellation_reason,created_at from nfse_invoices where office_id=$1 order by created_at desc",
+					"select id,issuer_id,taker_id,service_profile_id,status,competence,amount,description,official_key,simulation_reference,cancellation_status,cancelled_at,cancellation_reason,operation,taxation,substitutes_invoice_id,substituted_by_invoice_id,substitution_reason_code,substitution_reason,substituted_at,created_at from nfse_invoices where office_id=$1 order by created_at desc",
 					[c.officeId],
 				),
 				localQuery(
@@ -200,9 +203,14 @@ export async function POST(request: Request) {
 				[c.officeId, x.issuerId, x.takerId, x.serviceProfileId],
 			);
 			if (!links.rows[0]) throw new Error("Cadastros fiscais fora do escopo.");
+			if (x.substitutionInvoiceId) {
+				if (!x.substitutionReasonCode || !x.substitutionReason || x.substitutionReason.length < 15) throw new Error("Informe um motivo de substituição com pelo menos 15 caracteres.");
+				const source=await db.query("select id from nfse_invoices where id=$3 and office_id=$1 and issuer_id=$2 and status='authorized' and official_key~'^[0-9]{50}$' and substituted_by_invoice_id is null",[c.officeId,x.issuerId,x.substitutionInvoiceId]);
+				if(!source.rows[0])throw new Error("A NFS-e original não está disponível para substituição.");
+			}
 			const ibsCbs = { enabled:x.ibsCbsEnabled,purpose:x.ibsCbsPurpose,operationIndicator:x.ibsCbsOperationIndicator,destinationIndicator:x.ibsCbsDestinationIndicator,taxSituation:x.ibsCbsTaxSituation,classification:x.ibsCbsClassification,base:x.ibsCbsBase,ibsUfRate:x.ibsUfRate,ibsMunicipalRate:x.ibsMunicipalRate,cbsRate:x.cbsRate,ibsCredit:x.ibsCredit,cbsCredit:x.cbsCredit }, federalRetentions={ir:x.irRetention,inss:x.inssRetention,pis:x.pisRetention,cofins:x.cofinsRetention,csll:x.csllRetention};
 			return db.query(
-				"insert into nfse_invoices(office_id,issuer_id,taker_id,service_profile_id,competence,amount,description,idempotency_key,content_hash,created_by,unconditional_discount,conditional_discount,operation,taxation) values($1,$2,$3,$4,$5,$6,$7,$8,encode(digest($9,'sha256'),'hex'),$10,$11,$12,$13,$14) returning id,status",
+				"insert into nfse_invoices(office_id,issuer_id,taker_id,service_profile_id,competence,amount,description,idempotency_key,content_hash,created_by,unconditional_discount,conditional_discount,operation,taxation,substitutes_invoice_id,substitution_reason_code,substitution_reason) values($1,$2,$3,$4,$5,$6,$7,$8,encode(digest($9,'sha256'),'hex'),$10,$11,$12,$13,$14,$15,$16,$17) returning id,status",
 				[
 					c.officeId,
 					x.issuerId,
@@ -214,7 +222,7 @@ export async function POST(request: Request) {
 					x.idempotencyKey,
 					JSON.stringify(x),
 					c.userId,
-					x.unconditionalDiscount,x.conditionalDiscount,JSON.stringify({serviceMunicipalityIbge:x.serviceMunicipalityIbge,serviceMunicipalityName:x.serviceMunicipalityName,serviceMunicipalityUf:x.serviceMunicipalityUf,additionalInformation:x.additionalInformation}),JSON.stringify({issTaxation:x.issTaxation,issWithholding:x.issWithholding,issRate:x.issRate,ibsCbs,federalRetentions}),
+					x.unconditionalDiscount,x.conditionalDiscount,JSON.stringify({serviceMunicipalityIbge:x.serviceMunicipalityIbge,serviceMunicipalityName:x.serviceMunicipalityName,serviceMunicipalityUf:x.serviceMunicipalityUf,additionalInformation:x.additionalInformation}),JSON.stringify({issTaxation:x.issTaxation,issWithholding:x.issWithholding,issRate:x.issRate,ibsCbs,federalRetentions}),x.substitutionInvoiceId||null,x.substitutionInvoiceId?x.substitutionReasonCode:null,x.substitutionInvoiceId?x.substitutionReason:null,
 				],
 			);
 		});
@@ -231,7 +239,7 @@ async function remoteWorkspace(c: Awaited<ReturnType<typeof requireAppContext>>)
 	let issuersQuery = db.from("nfse_issuers").select("id,tax_id,legal_name,enabled").eq("office_id", c.officeId).order("legal_name");
 	let servicesQuery = db.from("nfse_service_profiles").select("id,issuer_id,name,description,national_code,municipal_code,nbs_code,taxation,service_municipality_ibge,operation_indicator,tax_situation").eq("office_id", c.officeId).order("name");
 	let takersQuery = db.from("nfse_takers").select("id,issuer_id,tax_id,legal_name,email,address").eq("office_id", c.officeId).order("legal_name");
-	let invoicesQuery = db.from("nfse_invoices").select("id,issuer_id,taker_id,service_profile_id,status,competence,amount,description,official_key,simulation_reference,cancellation_status,cancelled_at,cancellation_reason,created_at").eq("office_id", c.officeId).order("created_at", { ascending: false });
+	let invoicesQuery = db.from("nfse_invoices").select("id,issuer_id,taker_id,service_profile_id,status,competence,amount,description,official_key,simulation_reference,cancellation_status,cancelled_at,cancellation_reason,operation,taxation,substitutes_invoice_id,substituted_by_invoice_id,substitution_reason_code,substitution_reason,substituted_at,created_at").eq("office_id", c.officeId).order("created_at", { ascending: false });
 	let certificatesQuery = db.from("nfse_certificates").select("id,issuer_id,fingerprint_sha256,subject_tax_id,not_before,not_after,status").eq("office_id", c.officeId).order("created_at", { ascending: false });
 	let representationsQuery = db.from("nfse_representations").select("issuer_id,certificate_id,authorization_type,valid_until,allow_client_issuance,allow_cancellation,nfse_certificates!inner(subject_tax_id,not_after,status,not_before)").eq("office_id", c.officeId).eq("status", "active").lte("valid_from", new Date().toISOString()).or(`valid_until.is.null,valid_until.gt.${new Date().toISOString()}`).eq("nfse_certificates.status","active").lte("nfse_certificates.not_before",new Date().toISOString()).gt("nfse_certificates.not_after",new Date().toISOString());
 	if (c.issuerScope) {
@@ -258,7 +266,15 @@ async function remoteWorkspace(c: Awaited<ReturnType<typeof requireAppContext>>)
 		const code=first?.Codigo||first?.codigo,description=first?.Descricao||first?.descricao||details?.error||details?.message;
 		if(description)issuanceErrors.set(attempt.invoice_id,`${code?`${String(code)} — `:""}${String(description)}`);
 	}
-	const invoiceData=(invoices.data||[]).map(x=>({...x,cancellation_error:errorsById.get(x.id)||null,issuance_error:issuanceErrors.get(x.id)||null}));
+	const now=Date.now(),issuerTaxIds=new Map((issuers.data||[]).map(x=>[x.id,String(x.tax_id||"").replace(/\D/g,"")]));
+	const cancellationReady=new Set((certificates.data||[]).filter(certificate=>certificate.status==="active"&&new Date(certificate.not_before).getTime()<=now&&new Date(certificate.not_after).getTime()>now).map(certificate=>certificate.issuer_id));
+	for(const representation of representations.data||[]){
+		if(!representation.allow_cancellation)continue;
+		const certificate=Array.isArray(representation.nfse_certificates)?representation.nfse_certificates[0]:representation.nfse_certificates;
+		const issuerTaxId=issuerTaxIds.get(representation.issuer_id)||"",subjectTaxId=String(certificate?.subject_tax_id||"").replace(/\D/g,"");
+		if(issuerTaxId.length===14&&subjectTaxId.slice(0,8)===issuerTaxId.slice(0,8))cancellationReady.add(representation.issuer_id);
+	}
+	const invoiceData=(invoices.data||[]).map(x=>({...x,cancellation_error:errorsById.get(x.id)||null,issuance_error:issuanceErrors.get(x.id)||null,can_cancel:cancellationReady.has(x.issuer_id)}));
 	return Response.json({ simulation: false, role: c.role, environment: fiscalEnvironment() === 1 ? "government_production" : "government_homologation", issuers: issuers.data, services: services.data, takers: takers.data, invoices: invoiceData, certificates: certificates.data, representations:representations.data||[], signingReadyIssuerIds: (representations.data || []).map((x) => x.issuer_id) });
 }
 
@@ -293,11 +309,16 @@ async function remoteMutation(c: Awaited<ReturnType<typeof requireAppContext>>, 
 	]);
 	if (taker.error || service.error) throw new Error(taker.error?.message || service.error?.message);
 	if (!taker.data || !service.data) return Response.json({ error: "Cadastros fiscais fora do escopo." }, { status: 400 });
+	if (x.substitutionInvoiceId) {
+		if (!x.substitutionReasonCode || !x.substitutionReason || x.substitutionReason.length < 15) return Response.json({error:"Informe um motivo de substituição com pelo menos 15 caracteres."},{status:400});
+		const source=await db.from("nfse_invoices").select("id").eq("id",x.substitutionInvoiceId).eq("office_id",c.officeId).eq("issuer_id",x.issuerId).eq("environment",environment).eq("status","authorized").not("official_key","is",null).is("substituted_by_invoice_id",null).maybeSingle();
+		if(source.error)throw new Error(source.error.message);if(!source.data)return Response.json({error:"A NFS-e original não está disponível para substituição."},{status:409});
+	}
 	const contentHash = createHash("sha256").update(JSON.stringify(x)).digest("hex");
 	const prior = await db.from("nfse_invoices").select("id,content_hash").eq("office_id", c.officeId).eq("issuer_id", x.issuerId).eq("environment", environment).eq("idempotency_key", x.idempotencyKey).maybeSingle();
 	if (prior.error) throw new Error(prior.error.message);if (prior.data) return prior.data.content_hash === contentHash ? Response.json({ id: prior.data.id, replayed: true }) : Response.json({ error: "Chave idempotente reutilizada com dados diferentes." }, { status: 409 });
 	const ibsCbs = { enabled:x.ibsCbsEnabled,purpose:x.ibsCbsPurpose,operationIndicator:x.ibsCbsOperationIndicator,destinationIndicator:x.ibsCbsDestinationIndicator,taxSituation:x.ibsCbsTaxSituation,classification:x.ibsCbsClassification,base:x.ibsCbsBase,ibsUfRate:x.ibsUfRate,ibsMunicipalRate:x.ibsMunicipalRate,cbsRate:x.cbsRate,ibsCredit:x.ibsCredit,cbsCredit:x.cbsCredit }, federalRetentions={ir:x.irRetention,inss:x.inssRetention,pis:x.pisRetention,cofins:x.cofinsRetention,csll:x.csllRetention};
-	const saved = await db.from("nfse_invoices").insert({ office_id: c.officeId, issuer_id: x.issuerId, taker_id: x.takerId, service_profile_id: x.serviceProfileId, environment, competence: x.competence, amount: x.amount, description: x.description, idempotency_key: x.idempotencyKey, content_hash: contentHash, created_by: c.userId,unconditional_discount:x.unconditionalDiscount,conditional_discount:x.conditionalDiscount,operation:{serviceMunicipalityIbge:x.serviceMunicipalityIbge,serviceMunicipalityName:x.serviceMunicipalityName,serviceMunicipalityUf:x.serviceMunicipalityUf,additionalInformation:x.additionalInformation},taxation:{issTaxation:x.issTaxation,issWithholding:x.issWithholding,issRate:x.issRate,ibsCbs,federalRetentions} }).select("id,status").single();
+	const saved = await db.from("nfse_invoices").insert({ office_id: c.officeId, issuer_id: x.issuerId, taker_id: x.takerId, service_profile_id: x.serviceProfileId, environment, competence: x.competence, amount: x.amount, description: x.description, idempotency_key: x.idempotencyKey, content_hash: contentHash, created_by: c.userId,unconditional_discount:x.unconditionalDiscount,conditional_discount:x.conditionalDiscount,operation:{serviceMunicipalityIbge:x.serviceMunicipalityIbge,serviceMunicipalityName:x.serviceMunicipalityName,serviceMunicipalityUf:x.serviceMunicipalityUf,additionalInformation:x.additionalInformation},taxation:{issTaxation:x.issTaxation,issWithholding:x.issWithholding,issRate:x.issRate,ibsCbs,federalRetentions},substitutes_invoice_id:x.substitutionInvoiceId||null,substitution_reason_code:x.substitutionInvoiceId?x.substitutionReasonCode:null,substitution_reason:x.substitutionInvoiceId?x.substitutionReason:null }).select("id,status").single();
 	if (saved.error) throw new Error(saved.error.message);return Response.json(saved.data, { status: 201 });
 }
 

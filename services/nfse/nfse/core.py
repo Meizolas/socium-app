@@ -24,6 +24,7 @@ class NationalDpsData:
  simple_option:str='3';simple_tax_regime:str='1';special_tax_regime:str='0'
  iss_taxation:str='1';iss_withholding:str='1';iss_rate:Decimal|None=None
  approximate_simple_tax_rate:Decimal|None=None;ibs_cbs:dict|None=None;environment:int=2
+ substitution_key:str|None=None;substitution_reason_code:str|None=None;substitution_reason:str|None=None
 def build_national_dps(data:NationalDpsData,issued_at:datetime)->bytes:
  if data.environment not in (1,2):raise ValueError('Ambiente fiscal inválido.')
  if not(data.issuer_tax_id.isdigit() and len(data.issuer_tax_id)==14 and data.taker_tax_id.isdigit() and len(data.taker_tax_id) in (11,14)):raise ValueError('CPF/CNPJ inválido para o cenário nacional.')
@@ -33,10 +34,16 @@ def build_national_dps(data:NationalDpsData,issued_at:datetime)->bytes:
  municipal_code=''.join(x for x in (data.municipal_code or '') if x.isdigit()) or None
  nbs_code=''.join(x for x in (data.nbs_code or '') if x.isdigit()) or None
  if len(national_code)!=6:raise ValueError('Código de tributação nacional inválido.')
+ if data.substitution_key is not None:
+  if not(data.substitution_key.isdigit() and len(data.substitution_key)==50):raise ValueError('Chave da NFS-e substituida invalida.')
+  if data.substitution_reason_code not in ('01','02','03','04','05','99'):raise ValueError('Motivo de substituicao invalido.')
+  if not data.substitution_reason or not 15<=len(data.substitution_reason.strip())<=255:raise ValueError('A justificativa da substituicao deve ter entre 15 e 255 caracteres.')
  q=lambda name:f'{{{NS}}}{name}';root=E.Element(q('DPS'),nsmap={None:NS},versao='1.01');identifier=f'DPS{data.issuer_municipality}2{data.issuer_tax_id}{int(data.series):05d}{data.number:015d}';info=E.SubElement(root,q('infDPS'),Id=identifier)
  def add(parent,name,value=None):
   node=E.SubElement(parent,q(name));node.text=None if value is None else str(value);return node
  for name,value in [('tpAmb',str(data.environment)),('dhEmi',issued_at.isoformat(timespec='seconds')),('verAplic','Socium_1.0'),('serie',data.series),('nDPS',data.number),('dCompet',data.competence),('tpEmit','1'),('cLocEmi',data.issuer_municipality)]:add(info,name,value)
+ if data.substitution_key:
+  substitution=add(info,'subst');add(substitution,'chSubstda',data.substitution_key);add(substitution,'cMotivo',data.substitution_reason_code);add(substitution,'xMotivo',data.substitution_reason.strip())
  prest=add(info,'prest');add(prest,'CNPJ',data.issuer_tax_id);reg=add(prest,'regTrib');add(reg,'opSimpNac',data.simple_option);add(reg,'regApTribSN',data.simple_tax_regime);add(reg,'regEspTrib',data.special_tax_regime)
  taker=add(info,'toma');add(taker,'CPF' if len(data.taker_tax_id)==11 else 'CNPJ',data.taker_tax_id);add(taker,'xNome',data.taker_name)
  service=add(info,'serv');add(add(service,'locPrest'),'cLocPrestacao',data.service_municipality);codes=add(service,'cServ');add(codes,'cTribNac',national_code)

@@ -65,6 +65,7 @@ type Item = {
 	cancellation_reason?: string;
 	cancellation_error?: string;
 	issuance_error?: string;
+	can_cancel?: boolean;
 	certificate_id?: string;
 	authorization_type?: string;
 	allow_client_issuance?: boolean;
@@ -74,7 +75,13 @@ type Item = {
 	signing_mode?: "own" | "representation";
 	tax_situation?: string;
 	taxation?: Record<string, unknown>;
+	operation?: Record<string, unknown>;
 	address?: Record<string, unknown>;
+	substitutes_invoice_id?: string;
+	substituted_by_invoice_id?: string;
+	substitution_reason_code?: string;
+	substitution_reason?: string;
+	substituted_at?: string;
 };
 type Data = {
 	simulation: boolean;
@@ -120,6 +127,10 @@ type Draft = {
 	pisRetention: string;
 	cofinsRetention: string;
 	csllRetention: string;
+	substitutionInvoiceId: string;
+	substitutionKey: string;
+	substitutionReasonCode: "01" | "02" | "03" | "04" | "05" | "99";
+	substitutionReason: string;
 };
 const emptyDraft: Draft = {
 	takerId: "",
@@ -153,6 +164,10 @@ const emptyDraft: Draft = {
 	pisRetention: "0.00",
 	cofinsRetention: "0.00",
 	csllRetention: "0.00",
+	substitutionInvoiceId: "",
+	substitutionKey: "",
+	substitutionReasonCode: "99",
+	substitutionReason: "",
 };
 export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) {
 	const [data, setData] = useState<Data | null>(null),
@@ -226,12 +241,23 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 		ready = Boolean(issuer && services.length && signingReady),
 		simulation = data.simulation,
 		production = data.environment === "government_production";
+	function resetIssueState(){setDraft(emptyDraft);setResultId("");setStep(1)}
+	function navigate(next:Area){
+		if(next!==area&&(area==="issue"||next==="issue")){resetIssueState();setMessage("")}
+		setArea(next);
+	}
 	function enterRepresentation(target:Item){setRepresentingIssuerId(target.id);setRepresentationNotice(true);setArea("overview");setDraft(emptyDraft);setStep(1)}
 	function leaveRepresentation(){setRepresentingIssuerId("");setRepresentationNotice(true);setArea("overview");setDraft(emptyDraft);setStep(1)}
+	function startSubstitution(source:Item){
+		const operation=source.operation||{},taxation=source.taxation||{},ibs=(taxation.ibsCbs||{}) as Record<string,unknown>,retentions=(taxation.federalRetentions||{}) as Record<string,unknown>;
+		setDraft({...emptyDraft,takerId:source.taker_id||"",serviceProfileId:source.service_profile_id||"",competence:source.competence||emptyDraft.competence,amount:Number(source.amount||0).toFixed(2),description:source.description||"",serviceMunicipalityIbge:String(operation.serviceMunicipalityIbge||""),serviceMunicipalityName:String(operation.serviceMunicipalityName||""),serviceMunicipalityUf:String(operation.serviceMunicipalityUf||""),additionalInformation:String(operation.additionalInformation||""),issTaxation:(taxation.issTaxation as Draft["issTaxation"])||"taxable",issWithholding:(taxation.issWithholding as Draft["issWithholding"])||"not_withheld",issRate:String(taxation.issRate||"2.00"),ibsCbsEnabled:Boolean(ibs.enabled),ibsCbsPurpose:String(ibs.purpose||"0"),ibsCbsOperationIndicator:String(ibs.operationIndicator||""),ibsCbsDestinationIndicator:String(ibs.destinationIndicator||"0"),ibsCbsTaxSituation:String(ibs.taxSituation||""),ibsCbsClassification:String(ibs.classification||""),ibsCbsBase:String(ibs.base||"0.00"),ibsUfRate:String(ibs.ibsUfRate||"0.00"),ibsMunicipalRate:String(ibs.ibsMunicipalRate||"0.00"),cbsRate:String(ibs.cbsRate||"0.00"),ibsCredit:String(ibs.ibsCredit||"0.00"),cbsCredit:String(ibs.cbsCredit||"0.00"),irRetention:String(retentions.ir||"0.00"),inssRetention:String(retentions.inss||"0.00"),pisRetention:String(retentions.pis||"0.00"),cofinsRetention:String(retentions.cofins||"0.00"),csllRetention:String(retentions.csll||"0.00"),substitutionInvoiceId:source.id,substitutionKey:source.official_key||"",substitutionReasonCode:"99",substitutionReason:""});
+		setResultId("");setStep(1);setArea("issue");
+	}
 	async function saveDraft(enqueue = false) {
 		if (busy) return;
 		if (!issuer || !draft.takerId || !draft.serviceProfileId)
 			return setMessage("Selecione tomador e serviço.");
+		if(draft.substitutionInvoiceId&&draft.substitutionReason.trim().length<15)return setMessage("Informe o motivo da substituição com pelo menos 15 caracteres.");
 		setBusy(enqueue ? "issue" : "draft");
 		setMessage(enqueue ? `Criando o rascunho e enfileirando em ${simulation ? "simulação local" : production ? "produção governamental" : "homologação governamental"}…` : "Salvando rascunho…");
 		try {
@@ -264,18 +290,18 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 	}
 	return (
 		<div className={`app nfse-app ${collapsed ? "sidebar-collapsed" : ""}`}>
-			<Sidebar area={area} go={setArea} collapsed={collapsed} setCollapsed={setCollapsed} role={data.role} canRepresent={data.role==="admin"&&ownIssuers.length>0} />
+			<Sidebar area={area} go={navigate} collapsed={collapsed} setCollapsed={setCollapsed} role={data.role} canRepresent={data.role==="admin"&&ownIssuers.length>0} />
 			<main>
 				<Topbar
 					area={area}
-					go={setArea}
+					go={navigate}
 					issuer={issuer}
 					issuers={ownIssuers}
 					value={issuerId}
-					onChange={(value)=>{setIssuerId(value);setRepresentingIssuerId("")}}
+					onChange={(value)=>{resetIssueState();setMessage("");setIssuerId(value);setRepresentingIssuerId("")}}
 					representing={Boolean(representingIssuerId)}
 					onStopRepresenting={leaveRepresentation}
-					onAddCompany={()=>setArea("registrations")}
+					onAddCompany={()=>navigate("registrations")}
 					simulation={data.simulation}
 					production={production}
 					onOpenModules={onOpenModules}
@@ -291,15 +317,16 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 					</div>}
 					{message && <div className={`nfse-message ${busy ? "busy" : ""}`} role="status" aria-live="polite">{busy && <LoaderCircle className="nfse-spinner" size={18} />}<span>{message}</span></div>}
 					{area === "setup" && (
-						<Setup data={data} issuer={issuer} cert={cert} representation={representation} go={setArea} />
+						<Setup data={data} issuer={issuer} cert={cert} representation={representation} go={navigate} />
 					)}{" "}
 					{area === "overview" && (
 						<Overview
 							invoices={invoices}
 							ready={ready}
-							go={setArea}
+							go={navigate}
 							refresh={load}
 							canCancel={data.role === "admin" || data.role === "operator"}
+							onSubstitute={startSubstitution}
 						/>
 					)}{" "}
 					{area === "issue" && (
@@ -316,7 +343,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 							result={invoices.find((x) => x.id === resultId)}
 							refresh={load}
 							busy={busy}
-							go={setArea}
+							go={navigate}
 							simulation={data.simulation}
 							production={production}
 						/>
@@ -333,7 +360,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 							cert={cert}
 							representation={representation}
 							representativeCert={representationCertificate}
-							go={setArea}
+							go={navigate}
 							setMessage={setMessage}
 							refresh={load}
 						/>
@@ -520,12 +547,14 @@ function Overview({
 	go,
 	refresh,
 	canCancel,
+	onSubstitute,
 }: {
 	invoices: Item[];
 	ready: boolean;
 	go: (a: Area) => void;
 	refresh: () => Promise<unknown>;
 	canCancel: boolean;
+	onSubstitute: (invoice:Item) => void;
 }) {
 	const drafts = invoices.filter((x) => x.status === "draft").length,
 		pending = invoices.filter((x) =>
@@ -568,7 +597,7 @@ function Overview({
 						<RefreshCw size={17} /> Atualizar
 					</button>
 				</div>
-				<InvoiceList invoices={invoices} refresh={refresh} canCancel={canCancel} />
+				<InvoiceList invoices={invoices} refresh={refresh} canCancel={canCancel} onSubstitute={onSubstitute} />
 			</section>
 		</>
 	);
@@ -675,6 +704,7 @@ function Issue(props: IssueProps) {
 		if (!/^\d{7}$/.test(draft.serviceMunicipalityIbge)) next.municipality = "Selecione um município nas sugestões.";
 		if (!/^\d+\.\d{2}$/.test(draft.amount) || money(draft.amount) <= 0) next.amount = "Informe um valor válido no formato 0.00.";
 		if (draft.issTaxation === "taxable" && !draft.issRate) next.issRate = "Informe a alíquota do ISS.";
+		if(draft.substitutionInvoiceId&&draft.substitutionReason.trim().length<15)next.substitution="Descreva o motivo da substituição com pelo menos 15 caracteres.";
 		if (draft.ibsCbsEnabled) {
 			if (!/^\d{6}$/.test(draft.ibsCbsOperationIndicator)) next.ibsOperation = "Informe os 6 dígitos do indicador.";
 			if (!/^\d{3}$/.test(draft.ibsCbsTaxSituation)) next.ibsTax = "Informe os 3 dígitos do CST.";
@@ -694,7 +724,15 @@ function Issue(props: IssueProps) {
 		const timer = window.setInterval(() => { void refresh(); }, 1500);
 		return () => window.clearInterval(timer);
 	}, [result?.id, terminalResult, refresh]);
-	return <><PageTitle title="Emitir NFS-e" text="Preencha e revise todos os dados fiscais em uma única tela." />
+	return <><PageTitle title={draft.substitutionInvoiceId?"Substituir NFS-e":"Emitir NFS-e"} text={draft.substitutionInvoiceId?"Revise os dados da nova nota. A original só será cancelada se esta substituta for autorizada.":"Preencha e revise todos os dados fiscais em uma única tela."} />
+		{draft.substitutionInvoiceId&&<section className="card nfse-substitution-card">
+			<header className="nfse-substitution-header"><span className="nfse-substitution-icon"><RefreshCw size={19}/></span><div><b>Nota original</b><small title={draft.substitutionKey}>{draft.substitutionKey}</small></div><button type="button" onClick={()=>{setDraft(emptyDraft);setErrors({})}}><X size={16}/> Cancelar substituição</button></header>
+			<div className="nfse-substitution-fields">
+				<label>Motivo da substituição *<select value={draft.substitutionReasonCode} onChange={e=>setDraft({...draft,substitutionReasonCode:e.target.value as Draft["substitutionReasonCode"]})}><option value="01">Desenquadramento do Simples Nacional</option><option value="02">Enquadramento no Simples Nacional</option><option value="03">Inclusão retroativa de imunidade/isenção</option><option value="04">Exclusão retroativa de imunidade/isenção</option><option value="05">Rejeição pelo tomador ou intermediário responsável</option><option value="99">Outros</option></select></label>
+				<label>Justificativa *<textarea minLength={15} maxLength={255} value={draft.substitutionReason} onChange={e=>setDraft({...draft,substitutionReason:e.target.value})} placeholder="Explique o que será corrigido na nova NFS-e"/><small>{draft.substitutionReason.length}/255 caracteres</small>{errors.substitution&&<small className="nfse-field-error">{errors.substitution}</small>}</label>
+			</div>
+			<p className="nfse-substitution-note"><ShieldCheck size={16}/><span>A original só será cancelada se a nova NFS-e for autorizada.</span></p>
+		</section>}
 		{result && resultOpen && <div className="nfse-issuance-overlay" role="dialog" aria-modal="true" aria-labelledby="nfse-issuance-title"><section className={`nfse-issuance-modal ${result.status || "queued"}`}><button className="nfse-modal-close" aria-label="Fechar acompanhamento" onClick={() => setResultOpen(false)}><X size={20}/></button><div className="nfse-issuance-icon">{result.status === "authorized" ? <CheckCircle2 size={42}/> : result.status === "rejected" || result.status === "technical_failure" ? <X size={42}/> : <LoaderCircle className="nfse-spinner" size={42}/>}</div><h2 id="nfse-issuance-title">{result.status === "authorized" ? "NFS-e autorizada" : result.status === "rejected" ? "Emissão rejeitada" : result.status === "technical_failure" ? "Não foi possível concluir a emissão" : "Emitindo NFS-e, aguarde"}</h2><p className="nfse-issuance-description">{result.status === "authorized" ? "A nota foi autorizada e os documentos fiscais já estão disponíveis." : result.issuance_error ? result.issuance_error : terminalResult ? "O processamento foi encerrado. Revise os dados antes de tentar novamente." : "Sua nota foi recebida e está sendo processada. Esta janela será atualizada automaticamente."}</p>{!terminalResult && <div className="nfse-live-state"><span><Clock3 size={17}/> Atualização automática em tempo real</span><div className="nfse-progress-track"><i/></div><div className="nfse-process-steps"><b className="done">Recebida</b><b className={result.status !== "queued" ? "done" : "active"}>Processando</b><b>Autorização</b></div></div>}<div className="nfse-result-reference"><small>{result.status === "authorized" ? "Chave da NFS-e" : result.issuance_error ? "Motivo informado pela SEFIN" : "Status atual"}</small><b>{result.official_key || result.issuance_error || ({queued:"Aguardando processamento",claimed:"Preparando a emissão",signing:"Assinando o documento",transmitting:"Transmitindo ao governo",reconciling:"Confirmando a autorização",unknown:"Consultando situação"} as Record<string,string>)[result.status || ""] || result.status || "Aguardando processamento"}</b></div>{result.status === "authorized" && <div className="nfse-result-downloads"><a className="btn secondary" href={`/api/nfse/invoices/${result.id}/xml`}><Download size={18}/> Baixar XML</a><a className="btn" href={`/api/nfse/invoices/${result.id}/pdf`}><Download size={18}/> Baixar PDF</a></div>}{terminalResult && <button className="nfse-modal-finish" onClick={() => setResultOpen(false)}>Fechar</button>}</section></div>}
 		<div className="nfse-compact-layout"><div className="nfse-compact-main">
 			<section className="card nfse-compact-card"><h2><UserRound size={18}/> Tomador e competência</h2><div className="nfse-compact-row taker"><TakerPicker issuer={issuer} takers={takers} draft={draft} setDraft={setDraft} refresh={refresh} error={errors.taker}/><label>Data de competência *<input type="date" value={draft.competence} onChange={(e) => setDraft({ ...draft, competence:e.target.value })}/>{errors.competence && <small className="nfse-field-error">{errors.competence}</small>}</label></div>{selectedTaker && <div className="nfse-taker-strip"><Users size={21}/><div><b>{fiscalText(selectedTaker.legal_name)}</b><small>CPF/CNPJ: {formatTaxId(selectedTaker.tax_id)}{selectedTaker.email?`　|　E-mail: ${selectedTaker.email}`:""}</small></div></div>}</section>
@@ -1342,7 +1380,7 @@ function CertificateSettings({
 		</>
 	);
 }
-function InvoiceList({ invoices, refresh, canCancel }: { invoices: Item[]; refresh: () => Promise<unknown>; canCancel: boolean }) {
+function InvoiceList({ invoices, refresh, canCancel, onSubstitute }: { invoices: Item[]; refresh: () => Promise<unknown>; canCancel: boolean;onSubstitute:(invoice:Item)=>void }) {
 	const [selected,setSelected]=useState<Item|null>(null),[reasonCode,setReasonCode]=useState("1"),[reason,setReason]=useState(""),[busy,setBusy]=useState(false),[feedback,setFeedback]=useState(""),[submitted,setSubmitted]=useState(false);
 	const current=selected?invoices.find(x=>x.id===selected.id)||selected:null,pending=submitted&&["queued","processing"].includes(current?.cancellation_status||""),succeeded=submitted&&current?.status==="cancelled",failed=submitted&&!pending&&!succeeded&&Boolean(current?.cancellation_error);
 	useEffect(()=>{if(!invoices.some(x=>["queued","processing"].includes(x.cancellation_status||"")))return;const timer=window.setInterval(()=>void refresh(),3000);return()=>window.clearInterval(timer)},[invoices,refresh]);
@@ -1355,12 +1393,14 @@ function InvoiceList({ invoices, refresh, canCancel }: { invoices: Item[]; refre
 			{invoices.slice(0, 10).map((x) => (
 				<li key={x.id}>
 					<span className="nfse-invoice-description">{displayFiscalText(x.description)}</span>
-					<span className={`nfse-status ${x.cancellation_status&&x.status!=="cancelled"?`cancellation-${x.cancellation_status}`:x.status}`}>{x.cancellation_status && x.status!=="cancelled" ? cancellationLabel(x.cancellation_status) : statusLabel(x.status)}</span>
+					<span className={`nfse-status ${x.cancellation_status&&x.status!=="cancelled"?`cancellation-${x.cancellation_status}`:x.status}`}>{x.substituted_by_invoice_id?"Substituída":x.cancellation_status && x.status!=="cancelled" ? cancellationLabel(x.cancellation_status) : statusLabel(x.status)}</span>
 					{x.official_key && (
 						<div className="nfse-invoice-downloads">
 							<a className="nfse-artifact-link" href={`/api/nfse/invoices/${x.id}/xml`}><FileText size={15} /> XML</a>
 							<a className="nfse-artifact-link primary" href={`/api/nfse/invoices/${x.id}/pdf`}><Download size={15} /> PDF</a>
-							{canCancel&&x.status==="authorized"&&!x.cancellation_status&&<button className="nfse-artifact-link danger" type="button" onClick={()=>{setSelected(x);setReasonCode("1");setReason("");setFeedback("");setSubmitted(false)}}><Ban size={15}/> Cancelar</button>}
+							{x.status==="authorized"&&!x.cancellation_status&&!x.substituted_by_invoice_id&&<button className="nfse-artifact-link substitute" type="button" onClick={()=>onSubstitute(x)}><RefreshCw size={15}/> Substituir</button>}
+							{canCancel&&x.status==="authorized"&&!x.cancellation_status&&x.can_cancel&&<button className="nfse-artifact-link danger" type="button" onClick={()=>{setSelected(x);setReasonCode("1");setReason("");setFeedback("");setSubmitted(false)}}><Ban size={15}/> Cancelar</button>}
+							{canCancel&&x.status==="authorized"&&!x.cancellation_status&&!x.can_cancel&&<span className="nfse-cancel-unavailable" title="A SEFIN exige certificado do mesmo CNPJ-base da empresa emitente para cancelar pela API.">Cancelamento exige A1 do emitente</span>}
 						</div>
 					)}
 				</li>
