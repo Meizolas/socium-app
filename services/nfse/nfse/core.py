@@ -45,9 +45,8 @@ def build_national_dps(data:NationalDpsData,issued_at:datetime)->bytes:
  if nbs_code:add(codes,'cNBS',nbs_code)
  values=add(info,'valores');add(add(values,'vServPrest'),'vServ',format(data.amount,'.2f'));taxes=add(values,'trib');municipal=add(taxes,'tribMun');add(municipal,'tribISSQN',data.iss_taxation);add(municipal,'tpRetISSQN',data.iss_withholding)
  if data.iss_rate is not None:add(municipal,'pAliq',format(data.iss_rate,'.2f'))
- total_taxes=add(taxes,'totTrib')
- if data.approximate_simple_tax_rate is not None:add(total_taxes,'pTotTribSN',format(data.approximate_simple_tax_rate,'.2f'))
- else:add(total_taxes,'indTotTrib','0')
+ if data.simple_option=='3':add(add(taxes,'totTrib'),'pTotTribSN',format(data.approximate_simple_tax_rate or Decimal('0.00'),'.2f'))
+ else:add(add(taxes,'totTrib'),'indTotTrib','0')
  if data.ibs_cbs and data.ibs_cbs.get('enabled'):
   rtc=add(info,'IBSCBS');add(rtc,'finNFSe',data.ibs_cbs['purpose']);add(rtc,'cIndOp',data.ibs_cbs['operationIndicator']);add(rtc,'indDest',data.ibs_cbs['destinationIndicator']);rtc_values=add(rtc,'valores');rtc_taxes=add(rtc_values,'trib');group=add(rtc_taxes,'gIBSCBS');add(group,'CST',data.ibs_cbs['taxSituation']);add(group,'cClassTrib',data.ibs_cbs['classification'])
  return E.tostring(root,encoding='UTF-8',xml_declaration=True)

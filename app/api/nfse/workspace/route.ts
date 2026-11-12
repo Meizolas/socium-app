@@ -242,9 +242,23 @@ async function remoteWorkspace(c: Awaited<ReturnType<typeof requireAppContext>>)
 	const [issuers, services, takers, invoices, certificates, representations] = await Promise.all([issuersQuery, servicesQuery, takersQuery, invoicesQuery, certificatesQuery, representationsQuery]);
 	const failed = [issuers, services, takers, invoices, certificates, representations].find((result) => result.error);
 	if (failed?.error) throw new Error(failed.error.message);
-	const errorResult=await db.from("nfse_invoices").select("id,cancellation_error").eq("office_id",c.officeId);
+	const invoiceIds=(invoices.data||[]).map((x)=>x.id);
+	const [errorResult,attemptResult]=await Promise.all([
+		db.from("nfse_invoices").select("id,cancellation_error").eq("office_id",c.officeId),
+		invoiceIds.length
+			? db.from("nfse_attempts").select("invoice_id,classification,safe_details,created_at").in("invoice_id",invoiceIds).in("classification",["rejected","technical_failure"]).order("created_at",{ascending:false})
+			: Promise.resolve({data:[],error:null}),
+	]);
 	const errorsById=new Map((errorResult.error?[]:errorResult.data||[]).map(x=>[x.id,x.cancellation_error]));
-	const invoiceData=(invoices.data||[]).map(x=>({...x,cancellation_error:errorsById.get(x.id)||null}));
+	const issuanceErrors=new Map<string,string>();
+	for(const attempt of attemptResult.error?[]:attemptResult.data||[]){
+		if(issuanceErrors.has(attempt.invoice_id))continue;
+		const details=attempt.safe_details as Record<string,unknown>|null,errors=details?.erros;
+		const first=Array.isArray(errors)&&errors.length&&typeof errors[0]==="object"?errors[0] as Record<string,unknown>:null;
+		const code=first?.Codigo||first?.codigo,description=first?.Descricao||first?.descricao||details?.error||details?.message;
+		if(description)issuanceErrors.set(attempt.invoice_id,`${code?`${String(code)} — `:""}${String(description)}`);
+	}
+	const invoiceData=(invoices.data||[]).map(x=>({...x,cancellation_error:errorsById.get(x.id)||null,issuance_error:issuanceErrors.get(x.id)||null}));
 	return Response.json({ simulation: false, role: c.role, environment: fiscalEnvironment() === 1 ? "government_production" : "government_homologation", issuers: issuers.data, services: services.data, takers: takers.data, invoices: invoiceData, certificates: certificates.data, representations:representations.data||[], signingReadyIssuerIds: (representations.data || []).map((x) => x.issuer_id) });
 }
 
