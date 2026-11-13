@@ -84,7 +84,7 @@ export function AuthScreen() {
 			<input name="password" type="password" minLength={8} autoComplete="current-password" required placeholder="Senha" />
 		</>}
 		{mode === "signup" && <>
-			<p className="auth-intro">Use CPF para acesso pessoal ou CNPJ para acesso empresarial. O e-mail será usado para confirmação e recuperação.</p>
+			<p className="auth-intro">Cadastre-se com CPF ou CNPJ. Ambos podem acessar em nome próprio ou atuar como representante quando houver autorização. O e-mail será usado para confirmação e recuperação.</p>
 			<input name="name" autoComplete="name" required minLength={2} maxLength={120} placeholder="Seu nome" />
 			<input name="taxId" value={identifier} onChange={(event) => setIdentifier(formatTaxId(event.target.value))} required minLength={14} maxLength={18} inputMode="numeric" placeholder="CPF ou CNPJ" />
 			<input name="email" type="email" autoComplete="email" required maxLength={254} placeholder="E-mail de recuperação" />

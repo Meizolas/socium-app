@@ -4,6 +4,10 @@ O primeiro acesso utiliza CPF ou CNPJ e senha. O e-mail é mantido apenas para
 confirmação, recuperação e alertas de segurança. O documento informado é uma
 declaração e não concede propriedade da empresa nem autorização fiscal.
 
+Tanto uma pessoa física quanto uma pessoa jurídica pode atuar como representante.
+Essa capacidade é determinada pelo vínculo de representação autorizado, e não
+pelo tipo CPF/CNPJ usado para entrar na conta.
+
 O certificado A1 continua sendo utilizado exclusivamente para custódia fiscal,
 assinatura, emissão, substituição e cancelamento de NFS-e. Ele não é um método
 de login.
