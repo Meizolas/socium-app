@@ -5,6 +5,7 @@ import Image from "next/image";
 import { FileText, Files, ShieldCheck } from "lucide-react";
 import { RealApp } from "@/components/real-app";
 import { NfseWorkspace } from "@/components/nfse/nfse-workspace";
+import { FiscalOnboarding } from "@/components/fiscal-onboarding";
 
 type Module = "documentos" | "nfse";
 type Context = { role: "admin" | "operator" | "client"; onboardingStep: string; effectiveModules: Module[] };
@@ -27,6 +28,8 @@ export function WorkspaceGate() {
 	const modules = state.context.effectiveModules;
 	if (!modules.length && state.context.onboardingStep === "identity_verification")
 		return <ModuleStatus title="Identidade pendente de validação" message="Sua conta e a empresa foram cadastradas sem conceder acesso fiscal. Na próxima etapa, você poderá comprovar a identidade com certificado digital ou por um fluxo autorizado." verification />;
+	if (!modules.length && state.context.onboardingStep === "commercial_activation")
+		return <FiscalOnboarding onLogout={logout} />;
 	if (!modules.length)
 		return <ModuleStatus title="Ativação pendente" message="Seu cadastro foi concluído, mas nenhum módulo comercial está ativo. A escolha da oferta não concede acesso automaticamente." />;
 	if (!selectedModule) return <ModuleHub modules={modules} onSelect={setSelectedModule} />;
@@ -118,5 +121,7 @@ function CertificateValidationButton() {
 }
 
 function Logout() {
-	return <button className="module-logout" type="button" onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); location.reload(); }}>Sair da conta</button>;
+	return <button className="module-logout" type="button" onClick={logout}>Sair da conta</button>;
 }
+
+async function logout() { await fetch("/api/auth/logout", { method: "POST" }); location.reload(); }
