@@ -5,7 +5,7 @@ const templates = {
 		message: "Recebemos seu cadastro. Confirme este endereço de e-mail para ativar sua conta e acessar a plataforma Helians.",
 		button: "Confirmar meu e-mail",
 		footer: "Se você não criou esta conta, ignore esta mensagem.",
-		actionUrl: "https://helians.com.br/auth/email-action?token_hash={{ .TokenHash }}&type=signup",
+		actionUrl: "https://helians.com.br/auth/email-action?token_hash={{ .TokenHash }}&type=email",
 	},
 	recovery: {
 		preheader: "Use este link para criar uma nova senha na Helians.",

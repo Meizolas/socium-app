@@ -3,10 +3,10 @@
 import { useState } from "react";
 import Image from "next/image";
 
-export function EmailActionClient({ tokenHash, type }: { tokenHash: string; type: "signup" | "recovery" }) {
+export function EmailActionClient({ tokenHash, type }: { tokenHash: string; type: "email" | "recovery" }) {
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
-	const confirmation = type === "signup";
+	const confirmation = type === "email";
 	async function confirm() {
 		setBusy(true);
 		setError("");

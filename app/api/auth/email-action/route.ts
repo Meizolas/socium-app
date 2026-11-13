@@ -4,8 +4,8 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase-server";
 
 const input = z.object({
-	tokenHash: z.string().regex(/^[0-9a-f]{64}$/i),
-	type: z.enum(["signup", "recovery"]),
+	tokenHash: z.string().min(20).max(512).regex(/^[A-Za-z0-9._~-]+$/),
+	type: z.enum(["email", "signup", "recovery"]),
 }).strict();
 
 export async function POST(request: Request) {
@@ -16,10 +16,13 @@ export async function POST(request: Request) {
 		const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 		if (!url || !anon) return Response.json({ error: "Autenticação indisponível." }, { status: 503 });
 		const auth = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
-		const result = await auth.auth.verifyOtp({ token_hash: parsed.data.tokenHash, type: parsed.data.type });
-		if (result.error || !result.data.user || !result.data.session)
+		const verificationType = parsed.data.type === "recovery" ? "recovery" : "email";
+		const result = await auth.auth.verifyOtp({ token_hash: parsed.data.tokenHash, type: verificationType });
+		if (result.error || !result.data.user || !result.data.session) {
+			if (result.error) console.error("Falha ao validar ação de e-mail do Supabase Auth:", result.error.message);
 			return Response.json({ error: "Este link é inválido, já foi utilizado ou expirou." }, { status: 401 });
-		if (parsed.data.type === "recovery") return Response.json({
+		}
+		if (verificationType === "recovery") return Response.json({
 			accessToken: result.data.session.access_token,
 			refreshToken: result.data.session.refresh_token,
 		});
