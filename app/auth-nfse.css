@@ -14,6 +14,9 @@
 .auth-secondary-actions{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
 .auth-secondary-actions button{min-height:36px;border:0!important;background:transparent!important;padding:0 8px!important;color:#0865f5!important}
 .auth-feedback{padding:10px 12px;border-radius:8px;background:#f3f7fd;color:#415777!important;font-size:13px}
+.auth-divider{display:flex;align-items:center;gap:10px;color:#8793a8;font-size:12px}.auth-divider:before,.auth-divider:after{content:"";height:1px;flex:1;background:#e2e7ef}.auth-divider span{padding:0 3px}
+.auth-shell .auth-certificate-button{display:flex;align-items:center;justify-content:center;gap:8px;border-color:#8db4ef;background:#f4f8ff;color:#0759d1;font-weight:700}
+.auth-shell .auth-certificate-button:hover{background:#eaf2ff}
 .auth-security-note{display:flex;align-items:flex-start;gap:9px;padding:11px 12px;border:1px solid #cfe0f7;border-radius:8px;background:#f3f8ff;color:#315b91;font-size:13px;line-height:1.45}
 .auth-security-note svg{flex:none;margin-top:1px}
 .auth-status-card i{width:58px;height:58px;display:grid;place-items:center;margin:0 auto 4px;border-radius:50%;background:#e9f2ff;color:#0865f5;font-style:normal}

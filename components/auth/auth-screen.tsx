@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import { BadgeCheck } from "lucide-react";
 
 type Mode = "login" | "signup" | "recover";
 
@@ -21,6 +22,32 @@ export function AuthScreen() {
 	const [busy, setBusy] = useState(false);
 
 	useEffect(() => {
+		const query = new URLSearchParams(location.search);
+		const certificateCode = query.get("certificate_code");
+		const certificateError = query.get("certificate_error");
+		if (certificateError) {
+			history.replaceState(null, "", location.pathname);
+			queueMicrotask(() => setMessage("Não foi possível validar o certificado. Selecione um certificado ICP-Brasil válido e tente novamente."));
+			return;
+		}
+		if (certificateCode) {
+			void Promise.resolve().then(() => {
+				setBusy(true);
+				setMessage("Concluindo o acesso com certificado…");
+				return fetch("/api/auth/certificate/session", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ code: certificateCode }),
+				});
+			}).then(async (response) => {
+				const body = await response.json();
+				history.replaceState(null, "", location.pathname);
+				if (response.ok) location.reload();
+				else setMessage(body.error || "Não foi possível concluir o acesso por certificado.");
+			}).catch(() => setMessage("Não foi possível concluir o acesso por certificado."))
+				.finally(() => setBusy(false));
+			return;
+		}
 		const params = new URLSearchParams(location.hash.replace(/^#/, ""));
 		const accessToken = params.get("access_token");
 		const refreshToken = params.get("refresh_token");
@@ -83,6 +110,19 @@ export function AuthScreen() {
 	const loginIdentifierChanged = (value: string) => {
 		setIdentifier(/[a-z@]/i.test(value) ? value : formatCnpj(value));
 	};
+	async function startCertificateAccess() {
+		setBusy(true);
+		setMessage("Abrindo o seletor de certificado…");
+		try {
+			const response = await fetch("/api/auth/certificate/start", { method: "POST" });
+			const body = await response.json();
+			if (!response.ok || !body.url) throw new Error(body.error || "Não foi possível iniciar.");
+			location.assign(body.url);
+		} catch (error) {
+			setMessage(error instanceof Error ? error.message : "Não foi possível iniciar o acesso por certificado.");
+			setBusy(false);
+		}
+	}
 
 	return <main className="auth-shell"><form action={submit} className="auth-access-card">
 		<Image src="/api/logo?brand=helians-v1" alt="Helians" width={220} height={74} priority />
@@ -101,6 +141,7 @@ export function AuthScreen() {
 		</>}
 		{mode === "recover" && <input name="email" type="email" autoComplete="email" required placeholder="E-mail de recuperação" />}
 		<button type="submit" disabled={busy}>{busy ? "Processando…" : mode === "login" ? "Entrar" : mode === "signup" ? "Criar conta" : "Enviar instruções"}</button>
+		{mode === "login" && <><div className="auth-divider"><span>ou</span></div><button className="auth-certificate-button" type="button" disabled={busy} onClick={startCertificateAccess}><BadgeCheck size={20} /> Entrar com certificado digital</button></>}
 		<div className="auth-secondary-actions">
 			{mode === "login" && <>
 				<button type="button" onClick={() => switchMode("signup")}>Primeiro acesso</button>

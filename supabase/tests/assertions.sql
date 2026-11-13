@@ -7,4 +7,9 @@ do $$begin
  if has_function_privilege('anon','enqueue_nfse_issue(uuid)','execute') then raise exception 'enqueue fiscal exposto a anon';end if;
  if not has_function_privilege('authenticated','enqueue_nfse_issue(uuid)','execute') then raise exception 'enqueue fiscal indisponível ao usuário autenticado';end if;
  if has_function_privilege('anon','enqueue_nfse_reconciliation(uuid)','execute') then raise exception 'reconciliação exposta a anon';end if;
+ if has_function_privilege('authenticated','consume_certificate_auth_challenge(text)','execute') then raise exception 'certificate challenge exposed';end if;
+ if has_function_privilege('authenticated','consume_certificate_auth_exchange(text)','execute') then raise exception 'certificate exchange exposed';end if;
+ if not has_function_privilege('service_role','consume_certificate_auth_challenge(text)','execute') then raise exception 'backend cannot consume certificate challenge';end if;
+ if not is_valid_br_tax_id('52998224725') or not is_valid_br_tax_id('11222333000181') then raise exception 'valid CPF/CNPJ rejected';end if;
+ if is_valid_br_tax_id('11111111111') or is_valid_br_tax_id('11222333000182') then raise exception 'invalid CPF/CNPJ accepted';end if;
 end$$;

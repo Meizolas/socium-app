@@ -95,7 +95,26 @@ function Onboarding({ onDone }: { onDone: () => void }) {
 }
 
 function ModuleStatus({ title, message, verification = false }: { title: string; message: string; verification?: boolean }) {
-	return <main className="auth-shell"><section className="auth-status-card">{verification && <i><ShieldCheck size={32} /></i>}<h1>{title}</h1><p>{message}</p><Logout /></section></main>;
+	return <main className="auth-shell"><section className="auth-status-card">{verification && <i><ShieldCheck size={32} /></i>}<h1>{title}</h1><p>{message}</p>{verification && <CertificateValidationButton />}<Logout /></section></main>;
+}
+
+function CertificateValidationButton() {
+	const [message, setMessage] = useState("");
+	const [busy, setBusy] = useState(false);
+	async function start() {
+		setBusy(true);
+		setMessage("");
+		try {
+			const response = await fetch("/api/auth/certificate/start", { method: "POST" });
+			const body = await response.json();
+			if (!response.ok || !body.url) throw new Error(body.error || "Não foi possível iniciar a validação.");
+			location.assign(body.url);
+		} catch (error) {
+			setMessage(error instanceof Error ? error.message : "Não foi possível iniciar a validação.");
+			setBusy(false);
+		}
+	}
+	return <><button className="auth-certificate-button" type="button" disabled={busy} onClick={start}><ShieldCheck size={20} />{busy ? "Abrindo certificado…" : "Validar com certificado digital"}</button>{message && <p className="auth-feedback">{message}</p>}</>;
 }
 
 function Logout() {
