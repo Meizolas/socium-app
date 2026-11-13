@@ -5,6 +5,7 @@ const templates = {
 		message: "Recebemos seu cadastro. Confirme este endereço de e-mail para ativar sua conta e acessar a plataforma Helians.",
 		button: "Confirmar meu e-mail",
 		footer: "Se você não criou esta conta, ignore esta mensagem.",
+		actionUrl: "https://helians.com.br/auth/email-action?token_hash={{ .TokenHash }}&type=signup",
 	},
 	recovery: {
 		preheader: "Use este link para criar uma nova senha na Helians.",
@@ -12,6 +13,7 @@ const templates = {
 		message: "Recebemos uma solicitação para alterar a senha da sua conta Helians. Use o botão abaixo para criar uma nova senha.",
 		button: "Criar nova senha",
 		footer: "Se você não solicitou esta alteração, ignore esta mensagem. Sua senha atual continuará válida.",
+		actionUrl: "https://helians.com.br/auth/email-action?token_hash={{ .TokenHash }}&type=recovery",
 	},
 } as const;  
 
@@ -31,9 +33,9 @@ export async function GET(_request: Request, context: { params: Promise<{ type: 
 <tr><td style="padding:8px 40px 36px;text-align:center">
 <h1 style="margin:0 0 16px;font-size:26px;line-height:1.25;color:#071b45">${content.title}</h1>
 <p style="margin:0 0 26px;font-size:16px;line-height:1.6;color:#526685">${content.message}</p>
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center"><tr><td bgcolor="#0865f5" style="border-radius:8px"><a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 26px;color:#ffffff;text-decoration:none;font-size:16px;font-weight:700">${content.button}</a></td></tr></table>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center"><tr><td bgcolor="#0865f5" style="border-radius:8px"><a href="${content.actionUrl}" style="display:inline-block;padding:14px 26px;color:#ffffff;text-decoration:none;font-size:16px;font-weight:700">${content.button}</a></td></tr></table>
 <p style="margin:28px 0 8px;font-size:13px;line-height:1.5;color:#71809b">Se o botão não funcionar, copie e cole este endereço no navegador:</p>
-<p style="margin:0;word-break:break-all;font-size:12px;line-height:1.5"><a href="{{ .ConfirmationURL }}" style="color:#0865f5">{{ .ConfirmationURL }}</a></p>
+<p style="margin:0;word-break:break-all;font-size:12px;line-height:1.5"><a href="${content.actionUrl}" style="color:#0865f5">${content.actionUrl}</a></p>
 </td></tr>
 <tr><td style="padding:20px 32px;border-top:1px solid #e6edf7;text-align:center;font-size:12px;line-height:1.5;color:#71809b">${content.footer}<br>Esta é uma mensagem automática da Helians.</td></tr>
 </table>
