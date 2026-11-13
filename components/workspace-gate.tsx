@@ -27,7 +27,7 @@ export function WorkspaceGate() {
 	if (state.kind === "error") return <main className="auth-shell"><section><p>{state.message}</p><Logout /></section></main>;
 	const modules = state.context.effectiveModules;
 	if (!modules.length && state.context.onboardingStep === "identity_verification")
-		return <ModuleStatus title="Identidade pendente de validação" message="Sua conta e a empresa foram cadastradas sem conceder acesso fiscal. Na próxima etapa, você poderá comprovar a identidade com certificado digital ou por um fluxo autorizado." verification />;
+		return <ModuleStatus title="Cadastro em análise" message="Sua conta foi criada, mas a empresa ainda precisa ser validada pela equipe antes da liberação de recursos fiscais." />;
 	if (!modules.length && state.context.onboardingStep === "commercial_activation")
 		return <FiscalOnboarding onLogout={logout} />;
 	if (!modules.length)
@@ -55,23 +55,15 @@ async function fetchContext() {
 	return response;
 }
 
-function formatTaxId(value: string) {
-	const digits = value.replace(/\D/g, "").slice(0, 14);
-	if (digits.length <= 11)
-		return digits.replace(/^(\d{3})(\d)/, "$1.$2").replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3").replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-	return digits.replace(/^(\d{2})(\d)/, "$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3").replace(/\.(\d{3})(\d)/, ".$1/$2").replace(/(\d{4})(\d)/, "$1-$2");
-}
-
 function Onboarding({ onDone }: { onDone: () => void }) {
 	const [message, setMessage] = useState("");
-	const [taxId, setTaxId] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [idempotencyKey] = useState(() => crypto.randomUUID());
 	async function submit(form: FormData) {
 		setBusy(true);
 		setMessage("Criando sua conta…");
 		try {
-			const payload = { name: form.get("name"), officeName: form.get("officeName"), taxId: form.get("taxId"), offer: form.get("offer"), idempotencyKey };
+			const payload = { name: form.get("name"), officeName: form.get("officeName"), offer: form.get("offer"), idempotencyKey };
 			const response = await fetch("/api/auth/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 			const body = await response.json();
 			if (response.ok) return onDone();
@@ -88,7 +80,6 @@ function Onboarding({ onDone }: { onDone: () => void }) {
 		<p className="auth-intro">Informe quem você é e qual empresa deseja cadastrar. O CPF/CNPJ será validado antes de liberar operações fiscais.</p>
 		<label>Seu nome<input name="name" required minLength={2} maxLength={120} autoComplete="name" placeholder="Nome completo" /></label>
 		<label>Empresa ou organização<input name="officeName" required minLength={2} maxLength={200} autoComplete="organization" placeholder="Razão social ou nome da empresa" /></label>
-		<label>CPF ou CNPJ<input name="taxId" value={taxId} onChange={(event) => setTaxId(formatTaxId(event.target.value))} required minLength={14} maxLength={18} inputMode="numeric" placeholder="CPF ou CNPJ" /></label>
 		<label>Produto de interesse<select name="offer" defaultValue="nfse"><option value="nfse">Emitir NFS-e</option><option value="documentos">Enviar guias</option><option value="completo">Plataforma completa</option></select></label>
 		<div className="auth-security-note"><ShieldCheck size={20} /><span>Este cadastro não concede automaticamente propriedade da empresa nem acesso a certificados.</span></div>
 		<button type="submit" disabled={busy}>{busy ? "Criando conta…" : "Concluir primeiro acesso"}</button>
@@ -97,27 +88,8 @@ function Onboarding({ onDone }: { onDone: () => void }) {
 	</form></main>;
 }
 
-function ModuleStatus({ title, message, verification = false }: { title: string; message: string; verification?: boolean }) {
-	return <main className="auth-shell"><section className="auth-status-card">{verification && <i><ShieldCheck size={32} /></i>}<h1>{title}</h1><p>{message}</p>{verification && <CertificateValidationButton />}<Logout /></section></main>;
-}
-
-function CertificateValidationButton() {
-	const [message, setMessage] = useState("");
-	const [busy, setBusy] = useState(false);
-	async function start() {
-		setBusy(true);
-		setMessage("");
-		try {
-			const response = await fetch("/api/auth/certificate/start", { method: "POST" });
-			const body = await response.json();
-			if (!response.ok || !body.url) throw new Error(body.error || "Não foi possível iniciar a validação.");
-			location.assign(body.url);
-		} catch (error) {
-			setMessage(error instanceof Error ? error.message : "Não foi possível iniciar a validação.");
-			setBusy(false);
-		}
-	}
-	return <><button className="auth-certificate-button" type="button" disabled={busy} onClick={start}><ShieldCheck size={20} />{busy ? "Abrindo certificado…" : "Validar com certificado digital"}</button>{message && <p className="auth-feedback">{message}</p>}</>;
+function ModuleStatus({ title, message }: { title: string; message: string }) {
+	return <main className="auth-shell"><section className="auth-status-card"><h1>{title}</h1><p>{message}</p><Logout /></section></main>;
 }
 
 function Logout() {

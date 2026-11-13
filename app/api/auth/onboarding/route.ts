@@ -5,7 +5,6 @@ import { sessionToken } from "@/lib/auth-context";
 const input = z.object({
 	name: z.string().trim().min(2).max(120),
 	officeName: z.string().trim().min(2).max(200),
-	taxId: z.string().transform((value) => value.replace(/\D/g, "")).pipe(z.string().regex(/^\d{11}(\d{3})?$/)),
 	offer: z.enum(["documentos", "nfse", "completo"]),
 	idempotencyKey: z.string().uuid(),
 }).strict();
@@ -16,7 +15,7 @@ export async function POST(request: Request) {
 		if (!token) return Response.json({ error: "Autenticação necessária." }, { status: 401 });
 		const parsed = input.safeParse(await request.json());
 		if (!parsed.success)
-			return Response.json({ error: "Informe seu nome, a empresa e um CPF ou CNPJ válido." }, { status: 400 });
+			return Response.json({ error: "Informe seu nome, a empresa e o produto de interesse." }, { status: 400 });
 		const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 		const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 		if (!url || !anon) return Response.json({ error: "Autenticação indisponível." }, { status: 503 });
@@ -28,10 +27,13 @@ export async function POST(request: Request) {
 		if (userError || !user?.email_confirmed_at)
 			return Response.json({ error: "Sessão inválida ou e-mail ainda não confirmado." }, { status: 401 });
 		const value = parsed.data;
+		const account = await db.from("helians_accounts").select("login_tax_id,status").eq("auth_user_id", user.id).maybeSingle();
+		if (account.error || !account.data || account.data.status !== "active")
+			return Response.json({ error: "O CPF/CNPJ da conta ainda não foi confirmado." }, { status: 403 });
 		const result = await db.rpc("complete_public_onboarding", {
 			p_name: value.name,
 			p_office_name: value.officeName,
-			p_tax_id: value.taxId,
+			p_tax_id: account.data.login_tax_id,
 			p_offer: value.offer,
 			p_key: value.idempotencyKey,
 		});

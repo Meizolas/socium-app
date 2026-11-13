@@ -3,18 +3,17 @@ import { cookies } from "next/headers";
 import { localMode, localQuery } from "@/lib/local-db";
 import { createLocalSession, localCookie } from "@/lib/local-session";
 import { supabaseAdmin } from "@/lib/supabase-server";
-
-const digits = (value: unknown) => String(value || "").replace(/\D/g, "");
+import { isValidTaxId, normalizeTaxId } from "@/lib/br-tax-id";
 
 export async function POST(request: Request) {
 	try {
 		const body = await request.json();
 		const identifier = String(body.identifier || "").trim().toLowerCase();
-		const taxId = digits(identifier);
+		const taxId = normalizeTaxId(identifier);
 		const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier);
 		const password = String(body.password || "");
-		if ((!isEmail && taxId.length !== 14) || !password)
-			return Response.json({ error: "E-mail, CNPJ ou senha inválidos." }, { status: 401 });
+		if ((!isEmail && !isValidTaxId(taxId)) || !password)
+			return Response.json({ error: "CPF/CNPJ ou senha inválidos." }, { status: 401 });
 
 		if (localMode()) {
 			const found = await localQuery<{ id: string }>(
@@ -27,7 +26,7 @@ export async function POST(request: Request) {
 					   and u.encrypted_password=crypt($2,u.encrypted_password)`,
 				[isEmail ? identifier : taxId, password],
 			);
-			if (!found.rows[0]) return Response.json({ error: "E-mail, CNPJ ou senha inválidos." }, { status: 401 });
+			if (!found.rows[0]) return Response.json({ error: "CPF/CNPJ ou senha inválidos." }, { status: 401 });
 			(await cookies()).set(localCookie.name, createLocalSession(found.rows[0].id), localCookie.options);
 			return Response.json({ authenticated: true, localSimulation: true });
 		}
@@ -39,16 +38,16 @@ export async function POST(request: Request) {
 		let email = identifier;
 		if (!isEmail) {
 			const account = await db.from("helians_accounts").select("auth_user_id").eq("login_tax_id", taxId).eq("status", "active").maybeSingle();
-			if (account.error || !account.data) return Response.json({ error: "E-mail, CNPJ ou senha inválidos." }, { status: 401 });
+			if (account.error || !account.data) return Response.json({ error: "CPF/CNPJ ou senha inválidos." }, { status: 401 });
 			const user = await db.auth.admin.getUserById(account.data.auth_user_id);
 			email = user.data.user?.email || "";
-			if (!email) return Response.json({ error: "E-mail, CNPJ ou senha inválidos." }, { status: 401 });
+			if (!email) return Response.json({ error: "CPF/CNPJ ou senha inválidos." }, { status: 401 });
 		}
 
 		const auth = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
 		const result = await auth.auth.signInWithPassword({ email, password });
 		if (result.error || !result.data.session || !result.data.user.email_confirmed_at)
-			return Response.json({ error: "E-mail, CNPJ ou senha inválidos." }, { status: 401 });
+			return Response.json({ error: "CPF/CNPJ ou senha inválidos." }, { status: 401 });
 		const accountState = await db.from("helians_accounts").select("status").eq("auth_user_id", result.data.user.id).maybeSingle();
 		if (accountState.error || (accountState.data && accountState.data.status !== "active"))
 			return Response.json({ error: "Esta conta está suspensa ou revogada." }, { status: 403 });

@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { z } from "zod";
+import { supabaseAdmin } from "@/lib/supabase-server";
 
 const input = z.object({
 	accessToken: z.string().min(20).max(8192),
@@ -18,6 +19,10 @@ export async function POST(request: Request) {
 		const result = await auth.auth.setSession({ access_token: parsed.data.accessToken, refresh_token: parsed.data.refreshToken });
 		if (result.error || !result.data.user?.email_confirmed_at || !result.data.session)
 			return Response.json({ error: "O link de confirmação é inválido ou expirou." }, { status: 401 });
+		const activated = await supabaseAdmin().from("helians_accounts").update({
+			status: "active", activated_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+		}).eq("auth_user_id", result.data.user.id).eq("status", "invited");
+		if (activated.error) return Response.json({ error: "Não foi possível ativar o identificador da conta." }, { status: 500 });
 		const jar = await cookies();
 		const options = { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" as const, path: "/" };
 		jar.set("socium_session", result.data.session.access_token, { ...options, maxAge: result.data.session.expires_in });
