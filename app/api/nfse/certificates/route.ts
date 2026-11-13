@@ -292,7 +292,7 @@ async function uploadLocalCertificate(
 				[issuerId, officeId],
 			);
 			return db.query(
-				"insert into nfse_certificates(office_id,issuer_id,custody_provider,custody_reference,key_version,fingerprint_sha256,subject_tax_id,not_before,not_after,status) values($1,$2,'local-encrypted',$3,'v1',$4,$5,$6,$7,'active')",
+				"insert into nfse_certificates(office_id,issuer_id,custody_provider,custody_reference,custody_aad_id,key_version,fingerprint_sha256,subject_tax_id,not_before,not_after,status) values($1,$2,'local-encrypted',$3,$2,'v1',$4,$5,$6,$7,'active')",
 				[officeId, issuerId, reference, fingerprint, cnpj, cert.validity.notBefore, cert.validity.notAfter],
 			);
 		});

@@ -29,8 +29,13 @@ export async function POST(request: Request) {
 			options: { data: { name: parsed.data.name }, emailRedirectTo: appUrl },
 		});
 		if (result.error) {
-			if (result.error.message.toLowerCase().includes("password"))
+			const authError = result.error.message.toLowerCase();
+			if (authError.includes("password"))
 				return Response.json({ error: "A senha não atende aos requisitos de segurança." }, { status: 400 });
+			if (authError.includes("rate limit") || authError.includes("sending") || authError.includes("smtp") || authError.includes("email address not authorized")) {
+				console.error("Falha no envio da confirmação pelo Supabase Auth:", result.error.message);
+				return Response.json({ error: "Não foi possível enviar o e-mail de confirmação agora. Verifique a configuração SMTP e tente novamente." }, { status: 503 });
+			}
 			return Response.json({ message: genericMessage }, { status: 202 });
 		}
 		const user = result.data.user;

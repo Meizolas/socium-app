@@ -18,12 +18,13 @@ function identityNumbers(value: string, size: 11 | 14) {
 	return found;
 }
 
-function certificateCnpjs(cert: forge.pki.Certificate) {
-	const cnpjs = new Set<string>();
+function certificateTaxIds(cert: forge.pki.Certificate) {
+	const cnpjs = new Set<string>(), cpfs = new Set<string>();
 	const collect = (value: string, oid?: string) => {
 		for (const cnpj of identityNumbers(value, 14)) cnpjs.add(cnpj);
-		// Parse CPF-shaped values too so an e-CPF cannot be mistaken for an e-CNPJ.
-		if (oid === CPF_OID) identityNumbers(value, 11);
+		for (const cpf of identityNumbers(value, 11)) cpfs.add(cpf);
+		const compact = digits(value);
+		if (oid === CPF_OID && compact.length >= 19) cpfs.add(compact.slice(8, 19));
 	};
 	for (const attribute of cert.subject.attributes) {
 		const oid = String(attribute.type);
@@ -45,10 +46,10 @@ function certificateCnpjs(cert: forge.pki.Certificate) {
 			walk(forge.asn1.fromDer(name.value));
 		} catch { /* unknown extensions never grant ownership */ }
 	}
-	return [...cnpjs];
+	return { cnpjs: [...cnpjs], cpfs: [...cpfs] };
 }
 
-function parseCertificate(bytes: Buffer, password: string, expectedTaxId: string) {
+export function parseIdentityCertificate(bytes: Buffer, password: string, expectedTaxId: string) {
 	let p12: forge.pkcs12.Pkcs12Pfx;
 	try { p12 = forge.pkcs12.pkcs12FromAsn1(forge.asn1.fromDer(bytes.toString("binary")), false, password); }
 	catch { throw new CertificateInputError("PFX/P12 inválido ou senha incorreta."); }
@@ -63,12 +64,14 @@ function parseCertificate(bytes: Buffer, password: string, expectedTaxId: string
 	const now = new Date();
 	if (now < cert.validity.notBefore || now > cert.validity.notAfter)
 		throw new CertificateInputError("Certificado fora da validade.");
-	if (!certificateCnpjs(cert).includes(expectedTaxId))
-		throw new CertificateInputError(`O A1 não pertence ao CNPJ titular ${expectedTaxId}.`);
+	const identities = certificateTaxIds(cert);
+	const matches = expectedTaxId.length === 11 ? identities.cpfs.includes(expectedTaxId) : identities.cnpjs.includes(expectedTaxId);
+	if (!matches)
+		throw new CertificateInputError(`O A1 não pertence ao CPF/CNPJ titular ${expectedTaxId}.`);
 	const fingerprint = createHash("sha256").update(Buffer.from(
 		forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes(), "binary",
 	)).digest("hex");
-	return { cert, fingerprint };
+	return { cert, fingerprint, identities };
 }
 
 export class CertificateInputError extends Error {}
@@ -79,13 +82,13 @@ export async function storeNfseCertificate(officeId: string, issuerId: string, f
 	if (localMode()) {
 		const issuer = await localQuery<{ tax_id: string }>("select tax_id from nfse_issuers where id=$1 and office_id=$2", [issuerId, officeId]);
 		if (!issuer.rows[0]) throw new CertificateInputError("Emitente não encontrado.");
-		const expected = digits(issuer.rows[0].tax_id), parsed = parseCertificate(bytes, password, expected);
+		const expected = digits(issuer.rows[0].tax_id), parsed = parseIdentityCertificate(bytes, password, expected);
 		const reference = `custody/${officeId}/${issuerId}/${randomUUID()}.enc`, aad = `${officeId}:${issuerId}:v1`;
 		await localWrite(reference, Buffer.from(sealSecret(Buffer.from(JSON.stringify({ pfx: bytes.toString("base64"), password })), aad)));
 		try {
 			await localTransaction(async (db) => {
 				await db.query("update nfse_certificates set status='replaced' where issuer_id=$1 and office_id=$2 and status='active'", [issuerId, officeId]);
-				return db.query("insert into nfse_certificates(office_id,issuer_id,custody_provider,custody_reference,key_version,fingerprint_sha256,subject_tax_id,not_before,not_after,status) values($1,$2,'local-encrypted',$3,'v1',$4,$5,$6,$7,'active')", [officeId, issuerId, reference, parsed.fingerprint, expected, parsed.cert.validity.notBefore, parsed.cert.validity.notAfter]);
+				return db.query("insert into nfse_certificates(office_id,issuer_id,custody_provider,custody_reference,custody_aad_id,key_version,fingerprint_sha256,subject_tax_id,not_before,not_after,status) values($1,$2,'local-encrypted',$3,$2,'v1',$4,$5,$6,$7,'active')", [officeId, issuerId, reference, parsed.fingerprint, expected, parsed.cert.validity.notBefore, parsed.cert.validity.notAfter]);
 			});
 		} catch (error) { await localDelete(reference); throw error; }
 		return { fingerprint: parsed.fingerprint, notAfter: parsed.cert.validity.notAfter.toISOString(), simulation: true };
@@ -94,7 +97,7 @@ export async function storeNfseCertificate(officeId: string, issuerId: string, f
 	const issuer = await db.from("nfse_issuers").select("tax_id").eq("id", issuerId).eq("office_id", officeId).maybeSingle();
 	if (issuer.error) throw new Error(issuer.error.message);
 	if (!issuer.data) throw new CertificateInputError("Emitente não encontrado.");
-	const expected = digits(issuer.data.tax_id), parsed = parseCertificate(bytes, password, expected);
+	const expected = digits(issuer.data.tax_id), parsed = parseIdentityCertificate(bytes, password, expected);
 	const reference = `${officeId}/${issuerId}/${randomUUID()}.enc`, aad = `${officeId}:${issuerId}:v1`;
 	const sealed = sealSecret(Buffer.from(JSON.stringify({ pfx: bytes.toString("base64"), password })), aad);
 	const upload = await db.storage.from("nfse-custody").upload(reference, Buffer.from(sealed), { contentType: "application/octet-stream", upsert: false });

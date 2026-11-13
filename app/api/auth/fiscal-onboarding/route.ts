@@ -30,8 +30,12 @@ export async function GET(request: Request) {
 		} | null | undefined;
 		if (!entity)
 			return Response.json({ error: "A identidade titular ainda não foi validada por certificado." }, { status: 403 });
+		const identityCertificate = await db.from("nfse_certificates").select("id,subject_tax_id,not_after")
+			.eq("office_id", context.officeId).eq("subject_legal_entity_id", entity.id).eq("status", "active")
+			.lte("not_before", new Date().toISOString()).gt("not_after", new Date().toISOString()).maybeSingle();
+		if (identityCertificate.error) throw new Error(identityCertificate.error.message);
 		if (entity.entity_type !== "company")
-			return Response.json({ entity, requiresCompanyCertificate: true, status: "identity_only" });
+			return Response.json({ entity, identityCertificate: identityCertificate.data, representationOnly: true, status: "identity_verified" });
 		const [issuer, setup, certificate] = await Promise.all([
 			db.from("nfse_issuers").select("id,legal_name,municipal_registration,municipality_ibge,tax_regime,dps_series,simple_national_option,simple_national_taxation_regime,special_tax_regime")
 				.eq("office_id", context.officeId).eq("legal_entity_id", entity.id).maybeSingle(),
@@ -43,13 +47,13 @@ export async function GET(request: Request) {
 		if (issuer.error || setup.error || certificate.error)
 			throw new Error(issuer.error?.message || setup.error?.message || certificate.error?.message);
 		const activeCertificate = (certificate.data || []).find((item) => item.issuer_id === issuer.data?.id) || null;
-		return Response.json({ entity, issuer: issuer.data, setup: setup.data, activeCertificate }, { headers: { "Cache-Control": "no-store" } });
+		return Response.json({ entity, issuer: issuer.data, setup: setup.data, activeCertificate, identityCertificate: identityCertificate.data }, { headers: { "Cache-Control": "no-store" } });
 	} catch (error) { return authError(error); }
 }
 
 export async function POST(request: Request) {
 	try {
-		await requireAppContext(request, undefined, ["admin"]);
+		const context = await requireAppContext(request, undefined, ["admin"]);
 		const parsed = fiscalInput.safeParse(await request.json());
 		if (!parsed.success)
 			return Response.json({ error: "Confira os dados fiscais informados." }, { status: 400 });
@@ -72,6 +76,11 @@ export async function POST(request: Request) {
 				return Response.json({ error: "Os dados fiscais informados são inválidos." }, { status: 400 });
 			throw new Error(result.error.message);
 		}
-		return Response.json({ issuerId: result.data, status: "fiscal_ready" }, { status: 201 });
+		const db = supabaseAdmin();
+		const attached = await db.rpc("attach_identity_certificate_to_issuer", { p_office: context.officeId, p_issuer: result.data });
+		if (attached.error) throw new Error(attached.error.message);
+		const activated = await db.rpc("activate_self_service_modules", { p_office: context.officeId });
+		if (activated.error) throw new Error(activated.error.message);
+		return Response.json({ issuerId: result.data, certificateId: attached.data, status: "ready", modules: activated.data }, { status: 201 });
 	} catch (error) { return authError(error); }
 }

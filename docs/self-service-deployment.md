@@ -14,7 +14,8 @@ de login.
 
 ## 1. Banco de dados
 
-Aplique as migrations em ordem, inclusive `037_remove_certificate_login.sql`.
+Aplique as migrations em ordem, inclusive `037_remove_certificate_login.sql` e
+`038_self_service_identity_and_representation.sql`.
 A migration `034_certificate_authentication.sql` permanece no histórico para
 compatibilidade com ambientes que já a executaram; a `037` remove suas tabelas
 e funções.
@@ -42,14 +43,20 @@ uma rotina de rotação torna os certificados A1 já armazenados inutilizáveis.
 Não configure `CERT_AUTH_URL` nem `CERT_GATEWAY_SHARED_SECRET`. O serviço e o
 subdomínio exclusivos do antigo gateway podem ser removidos.
 
-## 3. Análise cadastral e ativação comercial
+## 3. Validação automática e ativação
 
-O cadastro público cria um tenant isolado com identidade pendente. A equipe não
-deve promover uma empresa para titular apenas com base no CNPJ declarado ou no
-controle de um e-mail.
+O cadastro público cria um tenant isolado com identidade pendente. O usuário
+envia um A1 cujo CPF/CNPJ deve coincidir com o identificador da conta. Somente
+essa correspondência promove o vínculo para titular verificado.
 
-Depois da validação cadastral por um procedimento autorizado e da aprovação
-contratual, ative os módulos em ambiente administrativo:
+Depois da prova da identidade, o usuário escolhe entre configurar o próprio
+emitente ou uma empresa representada. Representantes podem ser pessoas físicas
+ou jurídicas. A autorização de representação continua sujeita à procuração ou
+ao vínculo legal existente no ambiente nacional.
+
+O fluxo público ativa automaticamente a oferta escolhida quando a identidade e
+a forma de assinatura fiscal estiverem prontas. A operação administrativa abaixo
+continua disponível para correções, migrações e ativações assistidas:
 
 ```bash
 npm run activate:commercial -- \
@@ -83,13 +90,12 @@ Produção fiscal exige explicitamente `government_production`, ambiente `1` e
 ## 5. Verificação pós-publicação
 
 1. Crie uma conta com CPF ou CNPJ e senha e confirme o e-mail de recuperação.
-2. Confirme que o escritório foi criado isoladamente e ficou em análise.
-3. Conclua a validação cadastral pelo procedimento administrativo adotado.
-4. Preencha o cadastro fiscal e envie um A1 do mesmo CNPJ.
-5. Confirme que o módulo continua bloqueado antes da aprovação comercial.
-6. Ative o módulo administrativamente.
-7. Em homologação, emita uma DPS e valide fila e artefatos.
-8. Teste substituição e cancelamento com os certificados adequados.
+2. Envie um e-CPF ou e-CNPJ do mesmo titular usado no cadastro.
+3. Para emissão própria, conclua o cadastro fiscal da empresa titular.
+4. Para representação, informe a empresa representada e confirme a autorização oficial.
+5. Confirme que a oferta foi ativada somente depois da assinatura ficar pronta.
+6. Em homologação, emita uma DPS e valide fila e artefatos.
+7. Teste substituição e cancelamento com os certificados adequados.
 
 Nunca registre senha de PFX, chave de custódia, service role ou conteúdo do
 certificado em logs.

@@ -125,11 +125,11 @@ class GovernmentRuntime:
   else:
    with psycopg.connect(self.db,row_factory=psycopg.rows.dict_row) as conn:
     if job['kind']=='issue':
-     record=conn.execute("select i.*,c.custody_reference,c.issuer_id custody_aad_issuer_id,c.id signing_certificate_id from nfse_invoices i join profiles p on p.id=i.created_by and p.office_id=i.office_id and p.role in ('admin','operator','client') join office_modules m on m.office_id=i.office_id and m.module='nfse' and m.status='active' join nfse_certificates c on c.id=active_nfse_certificate(i) where i.id=%s and can_access_nfse_issuer_for_profile(p.id,i.issuer_id)",(job['invoice_id'],)).fetchone()
+     record=conn.execute("select i.*,c.custody_reference,c.custody_aad_id custody_aad_issuer_id,c.id signing_certificate_id from nfse_invoices i join profiles p on p.id=i.created_by and p.office_id=i.office_id and p.role in ('admin','operator','client') join office_modules m on m.office_id=i.office_id and m.module='nfse' and m.status='active' join nfse_certificates c on c.id=active_nfse_certificate(i) where i.id=%s and can_access_nfse_issuer_for_profile(p.id,i.issuer_id)",(job['invoice_id'],)).fetchone()
     elif job['kind']=='cancel':
-     record=conn.execute("select i.*,to_jsonb(x) cancellation,c.custody_reference,c.issuer_id custody_aad_issuer_id,c.id signing_certificate_id,c.subject_tax_id signing_subject_tax_id from nfse_invoices i join nfse_cancellations x on x.invoice_id=i.id and x.status in ('queued','processing') join nfse_certificates c on c.id=active_nfse_cancellation_certificate(i) where i.id=%s and i.status='authorized'",(job['invoice_id'],)).fetchone()
+     record=conn.execute("select i.*,to_jsonb(x) cancellation,c.custody_reference,c.custody_aad_id custody_aad_issuer_id,c.id signing_certificate_id,c.subject_tax_id signing_subject_tax_id from nfse_invoices i join nfse_cancellations x on x.invoice_id=i.id and x.status in ('queued','processing') join nfse_certificates c on c.id=active_nfse_cancellation_certificate(i) where i.id=%s and i.status='authorized'",(job['invoice_id'],)).fetchone()
     else:
-     record=conn.execute("select i.*,c.custody_reference,c.issuer_id custody_aad_issuer_id,c.id signing_certificate_id from nfse_invoices i join nfse_certificates c on c.id=active_nfse_certificate(i) where i.id=%s and i.status in ('unknown','reconciling','persistence_pending')",(job['invoice_id'],)).fetchone()
+     record=conn.execute("select i.*,c.custody_reference,c.custody_aad_id custody_aad_issuer_id,c.id signing_certificate_id from nfse_invoices i join nfse_certificates c on c.id=active_nfse_certificate(i) where i.id=%s and i.status in ('unknown','reconciling','persistence_pending')",(job['invoice_id'],)).fetchone()
   if not record:
    if job['kind']=='cancel':self.finish_cancellation(job,'technical_failure',b'',None)
    else:self.finish(job,'cancelled',b'',None)

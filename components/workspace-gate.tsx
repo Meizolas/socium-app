@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { FileText, Files, ShieldCheck } from "lucide-react";
+import { FileKey2, FileText, Files, ShieldCheck } from "lucide-react";
 import { RealApp } from "@/components/real-app";
 import { NfseWorkspace } from "@/components/nfse/nfse-workspace";
 import { FiscalOnboarding } from "@/components/fiscal-onboarding";
@@ -27,7 +27,7 @@ export function WorkspaceGate() {
 	if (state.kind === "error") return <main className="auth-shell"><section><p>{state.message}</p><Logout /></section></main>;
 	const modules = state.context.effectiveModules;
 	if (!modules.length && state.context.onboardingStep === "identity_verification")
-		return <ModuleStatus title="Cadastro em análise" message="Sua conta foi criada, mas a empresa ainda precisa ser validada pela equipe antes da liberação de recursos fiscais." />;
+		return <IdentityVerification onDone={() => location.reload()} />;
 	if (!modules.length && state.context.onboardingStep === "commercial_activation")
 		return <FiscalOnboarding onLogout={logout} />;
 	if (!modules.length)
@@ -90,6 +90,31 @@ function Onboarding({ onDone }: { onDone: () => void }) {
 
 function ModuleStatus({ title, message }: { title: string; message: string }) {
 	return <main className="auth-shell"><section className="auth-status-card"><h1>{title}</h1><p>{message}</p><Logout /></section></main>;
+}
+
+function IdentityVerification({ onDone }: { onDone: () => void }) {
+	const [busy, setBusy] = useState(false), [message, setMessage] = useState("");
+	async function verify(event: React.FormEvent<HTMLFormElement>) {
+		event.preventDefault(); setBusy(true); setMessage("");
+		try {
+			const response = await fetch("/api/auth/identity-certificate", { method: "POST", body: new FormData(event.currentTarget) });
+			const body = await response.json();
+			if (!response.ok) throw new Error(body.error || "Não foi possível validar o certificado.");
+			onDone();
+		} catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao validar o certificado."); }
+		finally { setBusy(false); }
+	}
+	return <main className="fiscal-setup-shell"><section className="fiscal-setup-card compact">
+		<Image src="/api/logo?brand=helians-v1" alt="Helians" width={190} height={64} priority />
+		<FileKey2 size={38} /><h1>Valide seu CPF ou CNPJ</h1>
+		<p>Envie um certificado A1 cujo titular seja o mesmo CPF ou CNPJ usado no cadastro. Ele comprova a identidade e ficará protegido na custódia fiscal.</p>
+		<form onSubmit={verify} className="fiscal-certificate"><div><b>Certificado A1</b><p>Representantes podem ser pessoas físicas ou jurídicas: e-CPF e e-CNPJ são aceitos.</p><div>
+			<input name="certificate" type="file" accept=".pfx,.p12,application/x-pkcs12" required />
+			<input name="password" type="password" placeholder="Senha do A1" required />
+			<button disabled={busy}>{busy ? "Validando…" : "Validar identidade"}</button>
+		</div></div></form>
+		{message && <p className="auth-feedback" aria-live="polite">{message}</p>}<Logout />
+	</section></main>;
 }
 
 function Logout() {
