@@ -5,7 +5,6 @@ import { sessionToken } from "@/lib/auth-context";
 const input = z.object({
 	name: z.string().trim().min(2).max(120),
 	officeName: z.string().trim().min(2).max(200),
-	offer: z.enum(["documentos", "nfse", "completo"]),
 	idempotencyKey: z.string().uuid(),
 }).strict();
 
@@ -34,7 +33,7 @@ export async function POST(request: Request) {
 			p_name: value.name,
 			p_office_name: value.officeName,
 			p_tax_id: account.data.login_tax_id,
-			p_offer: value.offer,
+			p_offer: "nfse",
 			p_key: value.idempotencyKey,
 		});
 		if (result.error) {

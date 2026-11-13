@@ -63,7 +63,7 @@ function Onboarding({ onDone }: { onDone: () => void }) {
 		setBusy(true);
 		setMessage("Criando sua conta…");
 		try {
-			const payload = { name: form.get("name"), officeName: form.get("officeName"), offer: form.get("offer"), idempotencyKey };
+			const payload = { name: form.get("name"), officeName: form.get("officeName"), idempotencyKey };
 			const response = await fetch("/api/auth/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 			const body = await response.json();
 			if (response.ok) return onDone();
@@ -80,7 +80,7 @@ function Onboarding({ onDone }: { onDone: () => void }) {
 		<p className="auth-intro">Informe quem você é e qual empresa deseja cadastrar. O CPF/CNPJ será validado antes de liberar operações fiscais.</p>
 		<label>Seu nome<input name="name" required minLength={2} maxLength={120} autoComplete="name" placeholder="Nome completo" /></label>
 		<label>Empresa ou organização<input name="officeName" required minLength={2} maxLength={200} autoComplete="organization" placeholder="Razão social ou nome da empresa" /></label>
-		<label>Produto de interesse<select name="offer" defaultValue="nfse"><option value="nfse">Emitir NFS-e</option><option value="documentos">Enviar guias</option><option value="completo">Plataforma completa</option></select></label>
+		<div className="auth-selected-product"><FileText size={20} /><span><small>Produto contratado</small><b>Emissão de NFS-e</b></span></div>
 		<div className="auth-security-note"><ShieldCheck size={20} /><span>Este cadastro não concede automaticamente propriedade da empresa nem acesso a certificados.</span></div>
 		<button type="submit" disabled={busy}>{busy ? "Criando conta…" : "Concluir primeiro acesso"}</button>
 		{message && <p className="auth-feedback" aria-live="polite">{message}</p>}
@@ -108,11 +108,14 @@ function IdentityVerification({ onDone }: { onDone: () => void }) {
 		<Image src="/api/logo?brand=helians-v1" alt="Helians" width={190} height={64} priority />
 		<FileKey2 size={38} /><h1>Valide seu CPF ou CNPJ</h1>
 		<p>Envie um certificado A1 cujo titular seja o mesmo CPF ou CNPJ usado no cadastro. Ele comprova a identidade e ficará protegido na custódia fiscal.</p>
-		<form onSubmit={verify} className="fiscal-certificate"><div><b>Certificado A1</b><p>Representantes podem ser pessoas físicas ou jurídicas: e-CPF e e-CNPJ são aceitos.</p><div>
-			<input name="certificate" type="file" accept=".pfx,.p12,application/x-pkcs12" required />
-			<input name="password" type="password" placeholder="Senha do A1" required />
-			<button disabled={busy}>{busy ? "Validando…" : "Validar identidade"}</button>
-		</div></div></form>
+		<form onSubmit={verify} className="fiscal-certificate identity-certificate-form">
+			<header><b>Certificado A1</b><p>Representantes podem ser pessoas físicas ou jurídicas. Certificados e-CPF e e-CNPJ são aceitos.</p></header>
+			<label><span>Arquivo do certificado</span><input name="certificate" type="file" accept=".pfx,.p12,application/x-pkcs12" required /><small>Formatos aceitos: .pfx ou .p12</small></label>
+			<div className="identity-certificate-actions">
+				<label><span>Senha do certificado</span><input name="password" type="password" autoComplete="off" placeholder="Digite a senha do A1" required /></label>
+				<button disabled={busy}>{busy ? "Validando…" : "Validar identidade"}</button>
+			</div>
+		</form>
 		{message && <p className="auth-feedback" aria-live="polite">{message}</p>}<Logout />
 	</section></main>;
 }
