@@ -35,6 +35,8 @@ import {
 	Handshake,
 	LogIn,
 	Ban,
+	Building2,
+	CircleHelp,
 } from "lucide-react";
 type Area = "overview" | "issue" | "registrations" | "representations" | "settings" | "setup";
 type Item = {
@@ -180,7 +182,8 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 		[step, setStep] = useState(1),
 		[draft, setDraft] = useState(emptyDraft),
 		[resultId, setResultId] = useState(""),
-		[collapsed, setCollapsed] = useState(false);
+		[collapsed, setCollapsed] = useState(false),
+		[tourOpen, setTourOpen] = useState(false);
 	const first = useRef(true);
 	const load = useCallback(async () => {
 		try {
@@ -194,6 +197,11 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 	useEffect(() => {
 		void load();
 	}, [load]);
+	useEffect(() => {
+		if (!data || window.localStorage.getItem("helians:nfse-tour-v1") === "done") return;
+		const timer = window.setTimeout(() => setTourOpen(true), 500);
+		return () => window.clearTimeout(timer);
+	}, [data]);
 	async function post(payload: Record<string, unknown>) {
 		try { const r = await fetch("/api/nfse/workspace", {
 				method: "POST",
@@ -302,6 +310,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 					representing={Boolean(representingIssuerId)}
 					onStopRepresenting={leaveRepresentation}
 					onAddCompany={()=>navigate("registrations")}
+					onStartTour={()=>{setCollapsed(false);setTourOpen(true)}}
 					simulation={data.simulation}
 					production={production}
 					onOpenModules={onOpenModules}
@@ -367,12 +376,60 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 					)}
 				</div>
 			</main>
+			{tourOpen && <GuidedTour area={area} go={navigate} canRepresent={data.role === "admin" && ownIssuers.length > 0} onClose={(completed) => { if (completed) window.localStorage.setItem("helians:nfse-tour-v1", "done"); setTourOpen(false); }} />}
 		</div>
 	);
 }
+
+type TourStep = { title: string; text: string; target?: string; area?: Area };
+function GuidedTour({ area, go, canRepresent, onClose }: { area: Area; go: (area: Area) => void; canRepresent: boolean; onClose: (completed: boolean) => void }) {
+	const steps: TourStep[] = [
+		{ title: "Bem-vindo ao Emissor NFS-e", text: "Vamos conhecer o fluxo completo. Você pode avançar, voltar ou encerrar quando quiser. O tour pode ser aberto novamente pelo seu perfil." },
+		{ title: "Empresa em uso", text: "Escolha aqui a empresa emissora. Todos os serviços, tomadores, certificados e notas exibidos pertencem à empresa selecionada.", target: "[data-tour='company-switcher']" },
+		{ title: "Visão geral", text: "Este painel resume notas recentes, rascunhos e emissões em processamento. Use-o para acompanhar a operação e acessar rapidamente uma nova emissão.", target: "[data-tour='overview-content']", area: "overview" },
+		{ title: "Emitir NFS-e", text: "Aqui você seleciona o tomador e o serviço, informa município, valores, descontos e retenções. O resumo lateral permite revisar tudo antes de salvar ou emitir.", target: "[data-tour='issue-content']", area: "issue" },
+		{ title: "Cadastros fiscais", text: "Cadastre empresas emissoras, serviços reutilizáveis e tomadores. Esses dados alimentam as opções da tela de emissão e evitam redigitação.", target: "[data-tour='registrations-content']", area: "registrations" },
+		...(canRepresent ? [{ title: "Representação", text: "Use esta área quando houver autorização válida para emitir em nome de outra pessoa ou empresa. Aqui você configura e acessa os representados.", target: "[data-tour='representations-content']", area: "representations" as Area }] : []),
+		{ title: "Configurações e assinatura", text: "Gerencie o certificado A1, confira sua validade e configure a identificação de acesso. O certificado fica protegido na custódia fiscal.", target: "[data-tour='settings-content']", area: "settings" },
+		{ title: "Seu perfil", text: "No perfil ficam as ações da conta: adicionar outra empresa, trocar de módulo, abrir configurações, reiniciar este tour e sair com segurança.", target: "[data-tour='profile-menu']" },
+		{ title: "Tudo pronto", text: "Use o menu lateral para navegar. Comece pelos cadastros fiscais, confirme o certificado e depois emita sua NFS-e. Você pode rever este tutorial a qualquer momento pelo perfil." },
+	];
+	const [index, setIndex] = useState(0);
+	const [rect, setRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+	const step = steps[index];
+	useEffect(() => { if (step.area && step.area !== area) go(step.area); }, [step.area, area, go]);
+	useEffect(() => {
+		let timer = 0;
+		function update() {
+			if (!step.target) { setRect(null); return; }
+			const element = document.querySelector(step.target) as HTMLElement | null;
+			if (!element) { setRect(null); return; }
+			element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+			const bounds = element.getBoundingClientRect();
+			setRect({ top: bounds.top, left: bounds.left, width: bounds.width, height: bounds.height });
+		}
+		timer = window.setTimeout(update, step.area && step.area !== area ? 260 : 80);
+		window.addEventListener("resize", update);
+		window.addEventListener("scroll", update, true);
+		return () => { window.clearTimeout(timer); window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
+	}, [step.target, step.area, area]);
+	const cardWidth = Math.min(410, Math.max(280, window.innerWidth - 32));
+	const cardTop = rect ? (rect.top + rect.height + 16 + 270 < window.innerHeight ? rect.top + rect.height + 16 : Math.max(16, rect.top - 270)) : Math.max(16, (window.innerHeight - 300) / 2);
+	const cardLeft = rect ? Math.min(Math.max(16, rect.left), window.innerWidth - cardWidth - 16) : Math.max(16, (window.innerWidth - cardWidth) / 2);
+	return <div className="nfse-tour" role="dialog" aria-modal="true" aria-labelledby="nfse-tour-title">
+		{rect ? <div className="nfse-tour-spotlight" style={{ top: rect.top - 7, left: rect.left - 7, width: rect.width + 14, height: rect.height + 14 }} /> : <div className="nfse-tour-backdrop" />}
+		<section className="nfse-tour-card" style={{ top: cardTop, left: cardLeft, width: cardWidth }}>
+			<button className="nfse-tour-close" type="button" aria-label="Fechar tutorial" onClick={() => onClose(true)}><X size={19}/></button>
+			<div className="nfse-tour-progress"><span>PASSO {index + 1} DE {steps.length}</span><div>{steps.map((_, itemIndex) => <i key={itemIndex} className={itemIndex <= index ? "active" : ""}/>)}</div></div>
+			<h2 id="nfse-tour-title">{step.title}</h2><p>{step.text}</p>
+			<footer><button type="button" className="nfse-tour-skip" onClick={() => onClose(true)}>{index === steps.length - 1 ? "Fechar" : "Pular tour"}</button><div>{index > 0 && <button type="button" className="btn secondary" onClick={() => setIndex(index - 1)}>Anterior</button>}<button type="button" className="btn" onClick={() => index === steps.length - 1 ? onClose(true) : setIndex(index + 1)}>{index === steps.length - 1 ? "Começar" : "Próximo"}</button></div></footer>
+		</section>
+	</div>;
+}
+
 function Sidebar({ area, go, collapsed, setCollapsed, role, canRepresent }: { area: Area; go: (a: Area) => void; collapsed: boolean; setCollapsed: (value: boolean) => void; role?: Data["role"];canRepresent:boolean }) {
 	const item = (key: Area, label: string, Icon: typeof Home) => (
-		<button className={area === key ? "active" : ""} onClick={() => go(key)} title={collapsed ? label : undefined}>
+		<button data-tour={`nav-${key}`} className={area === key ? "active" : ""} onClick={() => go(key)} title={collapsed ? label : undefined}>
 			<Icon size={20} />
 			<span>{label}</span>
 		</button>
@@ -405,6 +462,7 @@ function Topbar({
 	representing,
 	onStopRepresenting,
 	onAddCompany,
+	onStartTour,
 	simulation,
 	production,
 	onOpenModules,
@@ -418,6 +476,7 @@ function Topbar({
 	representing:boolean;
 	onStopRepresenting:()=>void;
 	onAddCompany:()=>void;
+	onStartTour:()=>void;
 	simulation: boolean;
 	production: boolean;
 	onOpenModules: () => void;
@@ -431,7 +490,7 @@ function Topbar({
 				<button className="breadcrumb-home" type="button" onClick={onOpenModules}>Helians</button><span>/</span><strong>Emitir NFS-e</strong><span>/</span><b>{labels[area]}</b>
 			</div>
 			<div className="headright">
-				{representing?<div className="nfse-represented-context"><small>Representando</small><b>{issuer?.legal_name}</b><button type="button" onClick={onStopRepresenting}>Encerrar</button></div>:<label className="nfse-issuer-select">
+				{representing?<div className="nfse-represented-context"><small>Representando</small><b>{issuer?.legal_name}</b><button type="button" onClick={onStopRepresenting}>Encerrar</button></div>:<label className="nfse-issuer-select" data-tour="company-switcher">
 					<span>Empresa</span>
 					<select value={value} onChange={(e) => onChange(e.target.value)}>
 						<option value="">Selecione uma empresa com certificado</option>
@@ -441,18 +500,19 @@ function Topbar({
 							</option>
 						))}
 					</select>
-					<button type="button" className="nfse-add-company" onClick={onAddCompany}>+ Adicionar empresa</button>
 				</label>}
 				{!production && <span className="badge blue">{simulation ? "Simulação local" : "Homologação governamental"}</span>}
 				<button className="iconbtn nfse-alert-button" type="button" aria-label="Notificações"><Bell size={21} /></button>
 				<div className="headmenu">
-					<button className="profilebtn" type="button" aria-expanded={profileOpen} onClick={() => setProfileOpen(!profileOpen)}>
+					<button data-tour="profile-menu" className="profilebtn" type="button" aria-expanded={profileOpen} onClick={() => setProfileOpen(!profileOpen)}>
 						<span className="avatar">SC</span><ProfileChevronDown size={19} />
 					</button>
 					{profileOpen && <div className="dropdown profilemenu nfse-profile-menu">
 						<div><span className="avatar">SC</span><p><b>Socium Contábil</b><small>{issuer?.legal_name || "Escritório atual"}</small></p></div>
+						<button type="button" onClick={() => { setProfileOpen(false); onAddCompany(); }}><Building2 size={18} /> Adicionar empresa</button>
 						<button type="button" onClick={onOpenModules}><LayoutGrid size={18} /> Trocar módulo</button>
 						<button type="button" onClick={() => { setProfileOpen(false); go("settings"); }}><Settings size={18} /> Configurações</button>
+						<button type="button" onClick={() => { setProfileOpen(false); onStartTour(); }}><CircleHelp size={18} /> Conhecer a plataforma</button>
 						<button className="nfse-logout-action" type="button" onClick={() => void logout()}><LogOut size={18} /> Sair da conta</button>
 					</div>}
 				</div>
@@ -578,7 +638,7 @@ function Overview({
 					<button onClick={() => go("setup")}>Resolver pendências</button>
 				</div>
 			)}
-			<div className="metrics">
+			<div className="metrics" data-tour="overview-content">
 				<Metric label="Notas recentes" value={invoices.length} />
 				<Metric label="Rascunhos" value={drafts} />
 				<Metric label="Em processamento" value={pending} />
@@ -647,15 +707,15 @@ function CurrencyInput({ value, onChange, ariaLabel }: { value: string; onChange
 	return <div className="nfse-currency-input"><span>R$</span><input aria-label={ariaLabel} inputMode="numeric" value={formatCurrencyInput(value)} onFocus={(event) => event.currentTarget.select()} onChange={(event) => onChange(currencyInputToDecimal(event.target.value))} /></div>;
 }
 
-function MunicipalityFormPicker({ name, resetKey = 0 }: { name: string; resetKey?: number }) {
-	const [query, setQuery] = useState("");
-	const [selected, setSelected] = useState<Municipality | null>(null);
+function MunicipalitySearchField({ label, selected, onSelect, onClear, resetKey = 0, error, className = "" }: { label: string; selected: Municipality | null; onSelect: (municipality: Municipality) => void; onClear: () => void; resetKey?: number; error?: string; className?: string }) {
+	const [query, setQuery] = useState(selected?.name || "");
 	const [options, setOptions] = useState<Municipality[]>([]);
 	const [searching, setSearching] = useState(false);
 	const [open, setOpen] = useState(false);
 	const [completedQuery, setCompletedQuery] = useState("");
 	const pickerRef = useRef<HTMLLabelElement>(null);
-	useEffect(() => { setQuery(""); setSelected(null); setOptions([]); setOpen(false); setCompletedQuery(""); }, [resetKey]);
+	const previousResetKey = useRef(resetKey);
+	useEffect(() => { if (previousResetKey.current === resetKey) return; previousResetKey.current = resetKey; setQuery(""); setOptions([]); setOpen(false); setCompletedQuery(""); }, [resetKey]);
 	useEffect(() => {
 		if (query.trim().length < 2 || query === selected?.name) { setOptions([]); setSearching(false); setCompletedQuery(""); return; }
 		const cacheKey = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -677,51 +737,24 @@ function MunicipalityFormPicker({ name, resetKey = 0 }: { name: string; resetKey
 		return () => { window.clearTimeout(timer); controller.abort(); };
 	}, [query, selected?.name]);
 	useEffect(() => { function closeOnOutsideClick(event: PointerEvent) { if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) setOpen(false); } document.addEventListener("pointerdown", closeOnOutsideClick); return () => document.removeEventListener("pointerdown", closeOnOutsideClick); }, []);
-	return <label ref={pickerRef} className="nfse-municipality nfse-registration-municipality">Município IBGE *
-		<input type="hidden" name={name} value={selected?.ibgeCode || ""} />
-		<input value={query} onFocus={() => setOpen(true)} onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }} onChange={(event) => { setQuery(event.target.value); setSelected(null); setOpen(true); }} placeholder="Digite o nome ou código IBGE" autoComplete="off" required />
+	return <label ref={pickerRef} className={`wide nfse-municipality ${className}`.trim()}>{label} *
+		<input value={query} onFocus={() => setOpen(true)} onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }} onChange={(event) => { setQuery(event.target.value); onClear(); setOpen(true); }} placeholder="Digite o nome ou código IBGE" autoComplete="off" required />
 		{searching && <small>Buscando municípios...</small>}
-		{open && options.length > 0 && <div className="nfse-municipality-options">{options.map((option) => <button type="button" key={option.ibgeCode} onClick={() => { setSelected(option); setQuery(option.name); setOptions([]); setOpen(false); }}><b>{option.name}/{option.uf}</b><small>IBGE {option.ibgeCode}</small></button>)}</div>}
+		{open && options.length > 0 && <div className="nfse-municipality-options">{options.map((option) => <button type="button" key={option.ibgeCode} onClick={() => { onSelect(option); setQuery(option.name); setOptions([]); setOpen(false); }}><b>{option.name}/{option.uf}</b><small>IBGE {option.ibgeCode}</small></button>)}</div>}
 		{selected ? <small className="nfse-selected">Selecionado: {selected.name}/{selected.uf} · IBGE {selected.ibgeCode}</small> : completedQuery && !searching && options.length === 0 && <small>Nenhum município encontrado. Confira o nome ou código IBGE.</small>}
+		{error && <small className="nfse-field-error">{error}</small>}
 	</label>;
 }
 
+function MunicipalityFormPicker({ name, resetKey = 0 }: { name: string; resetKey?: number }) {
+	const [selected, setSelected] = useState<Municipality | null>(null);
+	useEffect(() => { setSelected(null); }, [resetKey]);
+	return <><input type="hidden" name={name} value={selected?.ibgeCode || ""} /><MunicipalitySearchField label="Município IBGE" selected={selected} onSelect={setSelected} onClear={() => setSelected(null)} resetKey={resetKey} className="nfse-registration-municipality" /></>;
+}
+
 function MunicipalityPicker({ draft, setDraft, error }: { draft: Draft; setDraft: (d: Draft) => void; error?: string }) {
-	const [query, setQuery] = useState(draft.serviceMunicipalityName || "");
-	const [options, setOptions] = useState<Municipality[]>([]);
-	const [searching, setSearching] = useState(false);
-	useEffect(() => { void fetch("/api/nfse/municipalities?q=__warm__").catch(() => undefined); }, []);
-	useEffect(() => {
-		if (query.trim().length < 2 || query === draft.serviceMunicipalityName) { setOptions([]); setSearching(false); return; }
-		const cacheKey = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-		const cached = municipalitySearchCache.get(cacheKey);
-		if (cached) { setOptions(cached); setSearching(false); return; }
-		const controller = new AbortController();
-		const timer = setTimeout(async () => {
-			setSearching(true);
-			try {
-				const response = await fetch(`/api/nfse/municipalities?q=${encodeURIComponent(query)}`, { signal: controller.signal });
-				const body = await response.json();
-				if (response.ok) { const rows = body.municipalities || []; municipalitySearchCache.set(cacheKey, rows); setOptions(rows); }
-			} catch (error) {
-				// Trocar de tela ou alterar a busca cancela a requisição anterior.
-				// Isso é esperado e não pode virar um erro fatal no navegador.
-				if (!(error instanceof Error && error.name === "AbortError")) {
-					setOptions([]);
-				}
-			} finally {
-				if (!controller.signal.aborted) setSearching(false);
-			}
-		}, 80);
-		return () => { clearTimeout(timer); controller.abort(); };
-	}, [query, draft.serviceMunicipalityName]);
-	return <label className="wide nfse-municipality">Município da prestação *
-		<input value={query} onChange={(event) => { setQuery(event.target.value); setDraft({ ...draft, serviceMunicipalityIbge: "", serviceMunicipalityName: "", serviceMunicipalityUf: "" }); }} placeholder="Digite o nome ou código IBGE" autoComplete="off" />
-		{searching && <small>Buscando municípios...</small>}
-		{options.length > 0 && <div className="nfse-municipality-options">{options.map((option) => <button type="button" key={option.ibgeCode} onClick={() => { setDraft({ ...draft, serviceMunicipalityIbge: option.ibgeCode, serviceMunicipalityName: option.name, serviceMunicipalityUf: option.uf }); setQuery(option.name); setOptions([]); }}><b>{option.name}/{option.uf}</b><small>IBGE {option.ibgeCode}</small></button>)}</div>}
-		{draft.serviceMunicipalityIbge && <small className="nfse-selected">Selecionado: {draft.serviceMunicipalityName}/{draft.serviceMunicipalityUf} · IBGE {draft.serviceMunicipalityIbge}</small>}
-		{error && <small className="nfse-field-error">{error}</small>}
-	</label>;
+	const selected = draft.serviceMunicipalityIbge ? { ibgeCode: draft.serviceMunicipalityIbge, name: draft.serviceMunicipalityName, uf: draft.serviceMunicipalityUf } : null;
+	return <MunicipalitySearchField label="Município da prestação" selected={selected} onSelect={(option) => setDraft({ ...draft, serviceMunicipalityIbge: option.ibgeCode, serviceMunicipalityName: option.name, serviceMunicipalityUf: option.uf })} onClear={() => setDraft({ ...draft, serviceMunicipalityIbge: "", serviceMunicipalityName: "", serviceMunicipalityUf: "" })} error={error} />;
 }
 
 type IssueProps = { step: number; setStep: (n: number) => void; draft: Draft; setDraft: (d: Draft) => void; issuer?: Item; takers: Item[]; services: Item[]; cert?: Item; saveDraft: (e?: boolean) => Promise<void> | void; result?: Item; refresh: () => Promise<unknown>; busy: string; go: (a: Area) => void; simulation: boolean; production: boolean };
@@ -792,7 +825,7 @@ function Issue(props: IssueProps) {
 			<p className="nfse-substitution-note"><ShieldCheck size={16}/><span>A original só será cancelada se a nova NFS-e for autorizada.</span></p>
 		</section>}
 		{result && resultOpen && <div className="nfse-issuance-overlay" role="dialog" aria-modal="true" aria-labelledby="nfse-issuance-title"><section className={`nfse-issuance-modal ${result.status || "queued"}`}><button className="nfse-modal-close" aria-label="Fechar acompanhamento" onClick={() => setResultOpen(false)}><X size={20}/></button><div className="nfse-issuance-icon">{result.status === "authorized" ? <CheckCircle2 size={42}/> : result.status === "rejected" || result.status === "technical_failure" ? <X size={42}/> : <LoaderCircle className="nfse-spinner" size={42}/>}</div><h2 id="nfse-issuance-title">{result.status === "authorized" ? "NFS-e autorizada" : result.status === "rejected" ? "Emissão rejeitada" : result.status === "technical_failure" ? "Não foi possível concluir a emissão" : "Emitindo NFS-e, aguarde"}</h2><p className="nfse-issuance-description">{result.status === "authorized" ? "A nota foi autorizada e os documentos fiscais já estão disponíveis." : result.issuance_error ? result.issuance_error : terminalResult ? "O processamento foi encerrado. Revise os dados antes de tentar novamente." : "Sua nota foi recebida e está sendo processada. Esta janela será atualizada automaticamente."}</p>{!terminalResult && <div className="nfse-live-state"><span><Clock3 size={17}/> Atualização automática em tempo real</span><div className="nfse-progress-track"><i/></div><div className="nfse-process-steps"><b className="done">Recebida</b><b className={result.status !== "queued" ? "done" : "active"}>Processando</b><b>Autorização</b></div></div>}<div className="nfse-result-reference"><small>{result.status === "authorized" ? "Chave da NFS-e" : result.issuance_error ? "Motivo informado pela SEFIN" : "Status atual"}</small><b>{result.official_key || result.issuance_error || ({queued:"Aguardando processamento",claimed:"Preparando a emissão",signing:"Assinando o documento",transmitting:"Transmitindo ao governo",reconciling:"Confirmando a autorização",unknown:"Consultando situação"} as Record<string,string>)[result.status || ""] || result.status || "Aguardando processamento"}</b></div>{result.status === "authorized" && <div className="nfse-result-downloads"><a className="btn secondary" href={`/api/nfse/invoices/${result.id}/xml`}><Download size={18}/> Baixar XML</a><a className="btn" href={`/api/nfse/invoices/${result.id}/pdf`}><Download size={18}/> Baixar PDF</a></div>}{terminalResult && <button className="nfse-modal-finish" onClick={() => setResultOpen(false)}>Fechar</button>}</section></div>}
-		<div className="nfse-compact-layout"><div className="nfse-compact-main">
+		<div className="nfse-compact-layout" data-tour="issue-content"><div className="nfse-compact-main">
 			<section className="card nfse-compact-card"><h2><UserRound size={18}/> Tomador e competência</h2><div className="nfse-compact-row taker"><TakerPicker issuer={issuer} takers={takers} draft={draft} setDraft={setDraft} refresh={refresh} error={errors.taker}/><label>Data de competência *<input type="date" value={draft.competence} onChange={(e) => setDraft({ ...draft, competence:e.target.value })}/>{errors.competence && <small className="nfse-field-error">{errors.competence}</small>}</label></div>{selectedTaker && <div className="nfse-taker-strip"><Users size={21}/><div><b>{fiscalText(selectedTaker.legal_name)}</b><small>CPF/CNPJ: {formatTaxId(selectedTaker.tax_id)}{selectedTaker.email?`　|　E-mail: ${selectedTaker.email}`:""}</small></div></div>}</section>
 			<section className="card nfse-compact-card"><h2><Tags size={18}/> Serviço e códigos fiscais</h2><div className="nfse-service-top"><label>Serviço cadastrado *<select value={draft.serviceProfileId} onChange={(e) => chooseService(e.target.value)}><option value="">Selecione o serviço</option>{services.map((item) => <option key={item.id} value={item.id}>{fiscalText(item.name)}</option>)}</select>{errors.service && <small className="nfse-field-error">{errors.service}</small>}</label><div className="nfse-code-strip"><p><small>Código municipal</small><b>{selectedService?.municipal_code || "-"}</b></p><p><small>Código nacional</small><b>{selectedService?.national_code || "-"}</b></p><p><small>NBS</small><b>{selectedService?.nbs_code || "Não informado"}</b></p></div></div><div className="nfse-service-bottom"><label>Discriminação do serviço *<textarea maxLength={1000} value={draft.description} onChange={(e) => setDraft({ ...draft, description:e.target.value })}/><small>{draft.description.length}/1000 caracteres</small>{errors.description && <small className="nfse-field-error">{errors.description}</small>}</label><MunicipalityPicker draft={draft} setDraft={setDraft} error={errors.municipality}/></div></section>
 			<section className="card nfse-compact-card"><h2><Coins size={18}/> Valores, ISS e retenções</h2><div className="nfse-values-grid"><label>Valor do serviço *<CurrencyInput ariaLabel="Valor do serviço" value={draft.amount} onChange={(amount) => setDraft({ ...draft, amount })}/>{errors.amount && <small className="nfse-field-error">{errors.amount}</small>}</label><label>Desconto incondicionado<CurrencyInput ariaLabel="Desconto incondicionado" value={draft.unconditionalDiscount} onChange={(unconditionalDiscount) => setDraft({ ...draft, unconditionalDiscount })}/></label><label>Desconto condicionado<CurrencyInput ariaLabel="Desconto condicionado" value={draft.conditionalDiscount} onChange={(conditionalDiscount) => setDraft({ ...draft, conditionalDiscount })}/></label><label>ISS retido? *<select value={draft.issWithholding} onChange={(e) => setDraft({ ...draft, issWithholding:e.target.value as Draft["issWithholding"] })}><option value="not_withheld">Não</option><option value="withheld">Sim</option></select></label><label>Alíquota do ISS (%) *<input value={draft.issRate} onChange={(e) => setDraft({ ...draft, issRate:e.target.value })}/>{errors.issRate && <small className="nfse-field-error">{errors.issRate}</small>}</label><label>Enquadramento do ISS *<select value={draft.issTaxation} onChange={(e) => setDraft({ ...draft, issTaxation:e.target.value as Draft["issTaxation"] })}><option value="taxable">Tributável</option><option value="immune">Imunidade</option><option value="export">Exportação</option><option value="not_incident">Não incidência</option></select></label></div><button className="nfse-expand-button" onClick={() => setRetentionsOpen(!retentionsOpen)}>{retentionsOpen ? <ChevronDown size={18}/> : <ChevronRight size={18}/>} Ver retenções federais (IR, INSS, PIS, COFINS, CSLL)</button>{retentionsOpen && <div className="nfse-retentions-grid">{[["IR", "irRetention"],["INSS", "inssRetention"],["PIS", "pisRetention"],["COFINS", "cofinsRetention"],["CSLL", "csllRetention"]].map(([label,key]) => <label key={key}>{label}<CurrencyInput ariaLabel={label} value={draft[key as keyof Draft] as string} onChange={(value) => setDraft({ ...draft, [key]:value })}/></label>)}</div>}</section>
@@ -1105,7 +1138,7 @@ function Registrations({
 				title="Cadastros fiscais"
 				text="Gerencie empresas emissoras, serviços e tomadores."
 			/>
-			<div className="nfse-grid">
+			<div className="nfse-grid" data-tour="registrations-content">
 				<section className="card nfse-card">
 					<h2>Empresas emissoras</h2>
 					<p className="hint">Dados fiscais usados na identificação do prestador.</p>
@@ -1275,7 +1308,7 @@ function RepresentationWorkspace({ data, representativeIssuer, onRepresent, refr
 
 	return <>
 		<PageTitle title="Representação" text="Acesse e configure empresas autorizadas para emissão de NFS-e." />
-		<section className="card nfse-card full nfse-representation-shell">
+		<section className="card nfse-card full nfse-representation-shell" data-tour="representations-content">
 			<h2>Representar</h2>
 			<div className="nfse-representation-info">Se você já possui autorização para usar o Sistema Nacional da NFS-e em nome de outra pessoa física ou jurídica, informe o CPF/CNPJ abaixo. A procuração eletrônica ou representação legal precisa estar válida no ambiente oficial.</div>
 			<label className="nfse-representation-taxid">CPF/CNPJ que deseja representar *
@@ -1308,7 +1341,7 @@ function CertificateSettingsSimple({ issuer, cert, representation, representativ
 	const [uploading, setUploading] = useState(false);
 	const [feedback, setFeedback] = useState("");
 	const [identifierBusy, setIdentifierBusy] = useState(false);
-	return <><PageTitle title="Configurações" text="Forma de assinatura fiscal e acesso do escritório." /><section className="card nfse-card full"><h2>{representation?"Assinatura por representação":"Certificado A1"}</h2>
+	return <><PageTitle title="Configurações" text="Forma de assinatura fiscal e acesso do escritório." /><section className="card nfse-card full" data-tour="settings-content"><h2>{representation?"Assinatura por representação":"Certificado A1"}</h2>
 		{representation&&<div className="nfse-representation-settings"><Handshake/><div><b>Empresa representada pela SOCIUM</b><p>O certificado A1 utilizado pertence ao representante: {formatTaxId(representativeCert?.subject_tax_id)}.</p><p>Não é necessário nem recomendado cadastrar o certificado da empresa representada.</p></div><span className="badge green">Ativa</span></div>}
 		{cert && <div className="nfse-certificate"><ShieldCheck /><div><b>Certificado ativo</b><p>Titular: {formatTaxId(cert.subject_tax_id)}</p><p>Válido até {new Date(cert.not_after || "").toLocaleDateString("pt-BR")}</p></div><span className="badge green">Válido</span></div>}
 		{!representation&&(issuer ? <form onSubmit={async (event) => { event.preventDefault(); if (uploading) return; setUploading(true); setFeedback(""); setMessage(""); const form = event.currentTarget; try { const response = await fetch("/api/nfse/certificates", { method: "POST", body: new FormData(form) }); const body = await response.json(); setFeedback(response.ok ? "Certificado armazenado com segurança." : body.error || "Não foi possível adicionar o certificado."); if (response.ok) { form.reset(); await refresh(); } } catch { setFeedback("Falha de comunicação durante o envio."); } finally { setUploading(false); } }}><input type="hidden" name="issuerId" value={issuer.id} /><input name="certificate" type="file" accept=".pfx,.p12" required /><input name="password" type="password" required placeholder="Senha do certificado" />{feedback && <div className="nfse-inline-feedback" role="status">{feedback}</div>}<button disabled={uploading}>{uploading ? "Validando certificado…" : cert ? "Substituir certificado" : "Adicionar certificado"}</button></form> : <p className="nfse-empty">Selecione uma empresa emissora.</p>)}
