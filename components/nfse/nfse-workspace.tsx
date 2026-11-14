@@ -652,31 +652,37 @@ function MunicipalityFormPicker({ name, resetKey = 0 }: { name: string; resetKey
 	const [selected, setSelected] = useState<Municipality | null>(null);
 	const [options, setOptions] = useState<Municipality[]>([]);
 	const [searching, setSearching] = useState(false);
-	useEffect(() => { setQuery(""); setSelected(null); setOptions([]); }, [resetKey]);
+	const [open, setOpen] = useState(false);
+	const [completedQuery, setCompletedQuery] = useState("");
+	const pickerRef = useRef<HTMLLabelElement>(null);
+	useEffect(() => { setQuery(""); setSelected(null); setOptions([]); setOpen(false); setCompletedQuery(""); }, [resetKey]);
 	useEffect(() => {
-		if (query.trim().length < 2 || query === selected?.name) { setOptions([]); setSearching(false); return; }
+		if (query.trim().length < 2 || query === selected?.name) { setOptions([]); setSearching(false); setCompletedQuery(""); return; }
 		const cacheKey = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 		const cached = municipalitySearchCache.get(cacheKey);
-		if (cached) { setOptions(cached); return; }
+		if (cached) { setOptions(cached); setSearching(false); setCompletedQuery(cacheKey); return; }
 		const controller = new AbortController();
+		setSearching(true);
+		setOptions([]);
+		setCompletedQuery("");
 		const timer = window.setTimeout(async () => {
-			setSearching(true);
 			try {
 				const response = await fetch(`/api/nfse/municipalities?q=${encodeURIComponent(query)}`, { signal: controller.signal });
 				const body = await response.json();
-				if (response.ok) { const rows = body.municipalities || []; municipalitySearchCache.set(cacheKey, rows); setOptions(rows); }
+				if (response.ok) { const rows = body.municipalities || []; municipalitySearchCache.set(cacheKey, rows); setOptions(rows); setCompletedQuery(cacheKey); }
 			} catch (error) {
 				if (!(error instanceof Error && error.name === "AbortError")) setOptions([]);
 			} finally { if (!controller.signal.aborted) setSearching(false); }
 		}, 80);
 		return () => { window.clearTimeout(timer); controller.abort(); };
 	}, [query, selected?.name]);
-	return <label className="nfse-municipality nfse-registration-municipality">Município IBGE *
+	useEffect(() => { function closeOnOutsideClick(event: PointerEvent) { if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) setOpen(false); } document.addEventListener("pointerdown", closeOnOutsideClick); return () => document.removeEventListener("pointerdown", closeOnOutsideClick); }, []);
+	return <label ref={pickerRef} className="nfse-municipality nfse-registration-municipality">Município IBGE *
 		<input type="hidden" name={name} value={selected?.ibgeCode || ""} />
-		<input value={query} onChange={(event) => { setQuery(event.target.value); setSelected(null); }} placeholder="Digite o nome ou código IBGE" autoComplete="off" required />
+		<input value={query} onFocus={() => setOpen(true)} onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }} onChange={(event) => { setQuery(event.target.value); setSelected(null); setOpen(true); }} placeholder="Digite o nome ou código IBGE" autoComplete="off" required />
 		{searching && <small>Buscando municípios...</small>}
-		{options.length > 0 && <div className="nfse-municipality-options">{options.map((option) => <button type="button" key={option.ibgeCode} onClick={() => { setSelected(option); setQuery(option.name); setOptions([]); }}><b>{option.name}/{option.uf}</b><small>IBGE {option.ibgeCode}</small></button>)}</div>}
-		{selected ? <small className="nfse-selected">Selecionado: {selected.name}/{selected.uf} · IBGE {selected.ibgeCode}</small> : query.length >= 2 && !searching && options.length === 0 && <small>Selecione um município nas sugestões.</small>}
+		{open && options.length > 0 && <div className="nfse-municipality-options">{options.map((option) => <button type="button" key={option.ibgeCode} onClick={() => { setSelected(option); setQuery(option.name); setOptions([]); setOpen(false); }}><b>{option.name}/{option.uf}</b><small>IBGE {option.ibgeCode}</small></button>)}</div>}
+		{selected ? <small className="nfse-selected">Selecionado: {selected.name}/{selected.uf} · IBGE {selected.ibgeCode}</small> : completedQuery && !searching && options.length === 0 && <small>Nenhum município encontrado. Confira o nome ou código IBGE.</small>}
 	</label>;
 }
 
@@ -726,11 +732,13 @@ function TakerPicker({ issuer, takers, draft, setDraft, refresh, error }: { issu
 	const [open, setOpen] = useState(false);
 	const [searching,setSearching]=useState(false),[lookupMessage,setLookupMessage]=useState(""),[cpfName,setCpfName]=useState("");
 	const lastLookup=useRef("");
+	const pickerRef=useRef<HTMLLabelElement>(null);
 	const normalized = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 	const matches = takers.filter((item) => `${item.legal_name} ${item.tax_id}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(normalized)).slice(0, 8);
 	const lookup=useCallback(async(digits:string,legalName?:string)=>{if(!issuer||searching)return;setSearching(true);setLookupMessage("");try{const response=await fetch("/api/nfse/takers/lookup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({issuerId:issuer.id,taxId:digits,legalName})}),body=await response.json();if(response.status===422&&body.requiresName){setLookupMessage(body.message);setOpen(true);return}if(!response.ok){setLookupMessage(body.error||"Não foi possível identificar o tomador.");return}setDraft({...draft,takerId:body.taker.id});setQuery(fiscalText(body.taker.legal_name));setCpfName("");setOpen(false);await refresh()}catch{setLookupMessage("Falha ao consultar o CPF/CNPJ.")}finally{setSearching(false)}},[issuer,searching,draft,setDraft,refresh]);
 	useEffect(()=>{const digits=onlyDigits(query);if(![11,14].includes(digits.length)||draft.takerId||lastLookup.current===digits)return;lastLookup.current=digits;const known=takers.find(item=>onlyDigits(item.tax_id)===digits);if(known){setDraft({...draft,takerId:known.id});setQuery(fiscalText(known.legal_name));setOpen(false);return}const timer=window.setTimeout(()=>void lookup(digits),250);return()=>window.clearTimeout(timer)},[query,draft,takers,setDraft,lookup]);
-	return <label className="nfse-compact-picker">Tomador *<div className="nfse-search-input"><Search size={17}/><input value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true);setLookupMessage("");lastLookup.current=""; setDraft({ ...draft, takerId: "" }); }} placeholder="Digite o nome, CPF ou CNPJ" inputMode="search" autoComplete="off"/>{searching?<LoaderCircle className="nfse-spinner" size={17}/>:query && <button type="button" onClick={() => { setQuery("");setLookupMessage("");lastLookup.current=""; setDraft({ ...draft, takerId: "" }); }}>×</button>}</div>{searching&&<small className="nfse-lookup-state">Identificando tomador automaticamente…</small>}{open && !draft.takerId && <div className="nfse-picker-options">{matches.map((item) => <button type="button" key={item.id} onClick={() => { setDraft({ ...draft, takerId: item.id }); setQuery(fiscalText(item.legal_name)); setOpen(false); }}><b>{fiscalText(item.legal_name)}</b><small>{formatTaxId(item.tax_id)}</small></button>)}{lookupMessage&&<div className="nfse-cpf-inline"><small>{lookupMessage}</small>{onlyDigits(query).length===11&&<><input value={cpfName} onChange={event=>setCpfName(event.target.value)} placeholder="Nome completo do tomador"/><button type="button" disabled={cpfName.trim().length<2||searching} onClick={()=>void lookup(onlyDigits(query),cpfName)}>Confirmar CPF</button></>}</div>}{!matches.length&&!lookupMessage&&(query ? onlyDigits(query).length!==11&&onlyDigits(query).length!==14 : true)&&<small>{query ? "Nenhum tomador encontrado. Continue digitando para buscar pelo CPF/CNPJ." : "Nenhum tomador cadastrado para este emitente."}</small>}</div>}{error && <small className="nfse-field-error">{error}</small>}</label>;
+	useEffect(()=>{function closeOnOutsideClick(event:PointerEvent){if(pickerRef.current&&!pickerRef.current.contains(event.target as Node))setOpen(false)}document.addEventListener("pointerdown",closeOnOutsideClick);return()=>document.removeEventListener("pointerdown",closeOnOutsideClick)},[]);
+	return <label ref={pickerRef} className="nfse-compact-picker">Tomador *<div className="nfse-search-input"><Search size={17}/><input value={query} onFocus={() => setOpen(true)} onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }} onChange={(event) => { setQuery(event.target.value); setOpen(true);setLookupMessage("");lastLookup.current=""; setDraft({ ...draft, takerId: "" }); }} placeholder="Digite o nome, CPF ou CNPJ" inputMode="search" autoComplete="off"/>{searching?<LoaderCircle className="nfse-spinner" size={17}/>:query && <button type="button" onClick={() => { setQuery("");setLookupMessage("");lastLookup.current=""; setDraft({ ...draft, takerId: "" }); }}>×</button>}</div>{searching&&<small className="nfse-lookup-state">Identificando tomador automaticamente…</small>}{open && !draft.takerId && <div className="nfse-picker-options">{matches.map((item) => <button type="button" key={item.id} onClick={() => { setDraft({ ...draft, takerId: item.id }); setQuery(fiscalText(item.legal_name)); setOpen(false); }}><b>{fiscalText(item.legal_name)}</b><small>{formatTaxId(item.tax_id)}</small></button>)}{lookupMessage&&<div className="nfse-cpf-inline"><small>{lookupMessage}</small>{onlyDigits(query).length===11&&<><input value={cpfName} onChange={event=>setCpfName(event.target.value)} placeholder="Nome completo do tomador"/><button type="button" disabled={cpfName.trim().length<2||searching} onClick={()=>void lookup(onlyDigits(query),cpfName)}>Confirmar CPF</button></>}</div>}{!matches.length&&!lookupMessage&&(query ? onlyDigits(query).length!==11&&onlyDigits(query).length!==14 : true)&&<small>{query ? "Nenhum tomador encontrado. Continue digitando para buscar pelo CPF/CNPJ." : "Nenhum tomador cadastrado para este emitente."}</small>}</div>}{error && <small className="nfse-field-error">{error}</small>}</label>;
 }
 
 function Issue(props: IssueProps) {
