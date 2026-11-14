@@ -1177,7 +1177,7 @@ function Registrations({
 					{issuer ? (
 						<form onSubmit={async (event) => { event.preventDefault(); const target = event.currentTarget; if (await submit("taker", new FormData(target))) target.reset(); }}>
 							<input type="hidden" name="issuerId" value={issuer.id} />
-							<label>CNPJ do tomador *<input name="taxId" placeholder="00.000.000/0000-00" inputMode="numeric" autoComplete="off" required /></label>
+							<label>CNPJ/CPF do tomador *<input name="taxId" placeholder="00.000.000/0000-00" inputMode="numeric" autoComplete="off" required /></label>
 							<label>Razão social *<input name="legalName" placeholder="Nome ou razão social" required /></label>
 							<label className="wide">E-mail <small>Opcional</small><input name="email" type="email" placeholder="cliente@empresa.com.br" /></label>
 							<button disabled={busy}>{busy ? "Salvando…" : "Cadastrar tomador"}</button>
