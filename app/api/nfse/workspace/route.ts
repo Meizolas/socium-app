@@ -34,7 +34,7 @@ const actions = z.discriminatedUnion("action", [
 		action: z.literal("service"),
 		issuerId: uuid,
 		name: z.string().min(2),
-		nationalCode: z.string().min(1),
+		nationalCode: z.string().transform((value) => value.replace(/\D/g, "")).pipe(z.string().regex(/^\d{6}$/, "O código de tributação nacional deve ter exatamente 6 dígitos.")),
 		description: z.string().min(3),
 		municipalCode: z.string().max(20).optional(),
 		nbsCode: z.string().max(20).optional(),

@@ -63,13 +63,13 @@ def safe_response_details(body:bytes)->dict:
  try:payload=json.loads(body)
  except Exception:return {'responseFormat':'non_json'}
  if not isinstance(payload,dict):return {'responseFormat':'json_non_object'}
- allowed=('cStat','status','codigo','descricao','mensagem','message','erro','erros','errors')
+ allowed=('cStat','status','codigo','descricao','mensagem','message','error','erro','erros','errors','stage','type')
  details={key:payload[key] for key in allowed if key in payload}
  if len(json.dumps(details,ensure_ascii=False))>8000:return {'responseFormat':'structured_too_large','topLevelKeys':sorted(payload.keys())[:30]}
  return details
 
 def provider_error_message(details:dict)->str|None:
- for key in ('mensagem','message','descricao'):
+ for key in ('mensagem','message','descricao','error'):
   if isinstance(details.get(key),str):return details[key][:500]
  for key in ('erro','erros','errors'):
   candidate=details.get(key)

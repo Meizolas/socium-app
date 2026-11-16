@@ -791,6 +791,7 @@ function Issue(props: IssueProps) {
 		if (!draft.takerId) next.taker = "Selecione o tomador do serviço.";
 		if (!draft.competence) next.competence = "Informe a competência.";
 		if (!draft.serviceProfileId) next.service = "Selecione o serviço cadastrado.";
+		else if (!/^\d{6}$/.test(String(selectedService?.national_code || "").replace(/\D/g, ""))) next.service = "O serviço selecionado possui código nacional inválido. Cadastre-o com os 6 dígitos da tributação nacional.";
 		if (draft.description.trim().length < 3) next.description = "Informe a discriminação do serviço.";
 		if (!/^\d{7}$/.test(draft.serviceMunicipalityIbge)) next.municipality = "Selecione um município nas sugestões.";
 		if (!/^\d+\.\d{2}$/.test(draft.amount) || money(draft.amount) <= 0) next.amount = "Informe um valor maior que zero.";
@@ -1162,7 +1163,7 @@ function Registrations({
 						<form onSubmit={async (event) => { event.preventDefault(); const target = event.currentTarget; if (await submit("service", new FormData(target))) target.reset(); }}>
 							<input type="hidden" name="issuerId" value={issuer.id} />
 							<label>Nome do serviço *<input name="name" placeholder="Ex.: Serviços de contabilidade" required /></label>
-							<label>Código nacional *<input name="nationalCode" placeholder="Código de tributação nacional" required /></label>
+							<label>Código nacional *<input name="nationalCode" placeholder="Ex.: 17.19.01" inputMode="numeric" pattern="(?:\D*\d){6}\D*" title="Informe exatamente os 6 dígitos do código de tributação nacional" required /><small>Informe os 6 dígitos do código de tributação nacional.</small></label>
 							<label>Código municipal <small>Opcional</small><input name="municipalCode" placeholder="Quando exigido pelo município" /></label>
 							<label>NBS <small>Opcional</small><input name="nbsCode" placeholder="Quando aplicável" /></label>
 							<label className="wide">Descrição fiscal *<input name="description" placeholder="Descrição usada nas novas emissões" required /></label>
@@ -1320,7 +1321,7 @@ function RepresentationWorkspace({ data, representativeIssuer, onRepresent, refr
 				<div className="nfse-represented-company"><UserRoundPlus size={26} /><div><small>Novo emitente representado</small><strong>{formatTaxId(companyDraft.taxId)}</strong><span>Confira os dados necessários para a emissão fiscal.</span></div></div>
 				<div className="nfse-onboarding-grid">
 					<label className="wide">Razão social *<input value={companyDraft.legalName} onChange={(event) => setCompanyDraft({ ...companyDraft, legalName: event.target.value })} required /></label>
-					<label>Município IBGE *<input value={companyDraft.municipalityIbge} onChange={(event) => setCompanyDraft({ ...companyDraft, municipalityIbge: onlyDigits(event.target.value).slice(0, 7) })} inputMode="numeric" pattern="\d{7}" required />{companyDraft.municipalityName && <small>{companyDraft.municipalityName}/{companyDraft.uf}</small>}</label>
+					<MunicipalitySearchField label="Município IBGE" selected={companyDraft.municipalityIbge && companyDraft.municipalityName ? { ibgeCode: companyDraft.municipalityIbge, name: companyDraft.municipalityName, uf: companyDraft.uf || "" } : null} onSelect={(option) => setCompanyDraft({ ...companyDraft, municipalityIbge: option.ibgeCode, municipalityName: option.name, uf: option.uf })} onClear={() => setCompanyDraft({ ...companyDraft, municipalityIbge: "", municipalityName: "", uf: "" })} className="nfse-representation-municipality" />
 					<label>Opção pelo Simples *<select value={companyDraft.simpleNationalOption} onChange={(event) => setCompanyDraft({ ...companyDraft, simpleNationalOption: event.target.value as RepresentedCompanyDraft["simpleNationalOption"] })}><option value="1">Não optante</option><option value="2">Optante - MEI</option><option value="3">Optante - ME/EPP</option></select></label>
 					<label>Apuração do Simples *<select value={companyDraft.simpleNationalTaxationRegime} onChange={(event) => setCompanyDraft({ ...companyDraft, simpleNationalTaxationRegime: event.target.value as "1" | "2" })}><option value="1">Tributos federais e ISS pelo Simples</option><option value="2">Tributos federais pelo Simples e ISS pela NFS-e</option></select></label>
 					<label>Regime especial *<select value={companyDraft.specialTaxRegime} onChange={(event) => setCompanyDraft({ ...companyDraft, specialTaxRegime: event.target.value })}><option value="0">Nenhum</option><option value="1">Microempresa municipal</option><option value="2">Estimativa</option><option value="3">Sociedade de profissionais</option><option value="4">Cooperativa</option><option value="5">MEI</option><option value="6">ME/EPP</option></select></label>
