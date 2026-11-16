@@ -1132,6 +1132,7 @@ function Registrations({
 	busy: boolean;
 }) {
 	const [issuerFormKey, setIssuerFormKey] = useState(0);
+	const [takerTaxId, setTakerTaxId] = useState("");
 	return (
 		<>
 			<PageTitle
@@ -1175,10 +1176,10 @@ function Registrations({
 					<h2>Tomadores</h2>
 					<p className="hint">Clientes que poderão ser selecionados durante a emissão.</p>
 					{issuer ? (
-						<form onSubmit={async (event) => { event.preventDefault(); const target = event.currentTarget; if (await submit("taker", new FormData(target))) target.reset(); }}>
+						<form onSubmit={async (event) => { event.preventDefault(); const target = event.currentTarget; if (await submit("taker", new FormData(target))) { target.reset(); setTakerTaxId(""); } }}>
 							<input type="hidden" name="issuerId" value={issuer.id} />
-							<label>CNPJ/CPF do tomador *<input name="taxId" placeholder="00.000.000/0000-00" inputMode="numeric" autoComplete="off" required /></label>
-							<label>Razão social *<input name="legalName" placeholder="Nome ou razão social" required /></label>
+							<label>CPF/CNPJ do tomador *<input name="taxId" value={takerTaxId} onChange={(event) => setTakerTaxId(maskTaxId(event.target.value))} placeholder="000.000.000-00 ou 00.000.000/0000-00" inputMode="numeric" autoComplete="off" maxLength={18} required /><small>{onlyDigits(takerTaxId).length <= 11 ? "Pessoa física: informe o CPF" : "Pessoa jurídica: informe o CNPJ"}</small></label>
+							<label>Nome ou razão social *<input name="legalName" placeholder="Nome completo ou razão social" required /></label>
 							<label className="wide">E-mail <small>Opcional</small><input name="email" type="email" placeholder="cliente@empresa.com.br" /></label>
 							<button disabled={busy}>{busy ? "Salvando…" : "Cadastrar tomador"}</button>
 						</form>

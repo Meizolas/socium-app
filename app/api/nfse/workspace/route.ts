@@ -8,15 +8,20 @@ import {
 import { localMode, localQuery, localTransaction } from "@/lib/local-db";
 import { supabaseAdmin } from "@/lib/supabase-server";
 import { createHash } from "node:crypto";
-const taxId = z.preprocess(
+import { isValidTaxId } from "@/lib/br-tax-id";
+const issuerTaxId = z.preprocess(
 	(value) => typeof value === "string" ? value.replace(/\D/g, "") : value,
 	z.string().regex(/^\d{14}$/, "Informe um CNPJ com 14 dígitos."),
 ),
+	takerTaxId = z.preprocess(
+		(value) => typeof value === "string" ? value.replace(/\D/g, "") : value,
+		z.string().refine((value) => [11, 14].includes(value.length) && isValidTaxId(value), "Informe um CPF ou CNPJ válido."),
+	),
 	uuid = z.string().uuid();
 const actions = z.discriminatedUnion("action", [
 	z.object({
 		action: z.literal("issuer"),
-		taxId,
+		taxId: issuerTaxId,
 		legalName: z.string().trim().min(2, "Informe a razão social."),
 		municipalityIbge: z.string().regex(/^\d{7}$/),
 		taxRegime: z.string().min(2),
@@ -37,8 +42,8 @@ const actions = z.discriminatedUnion("action", [
 	z.object({
 		action: z.literal("taker"),
 		issuerId: uuid,
-		taxId,
-		legalName: z.string().trim().min(2, "Informe a razão social."),
+		taxId: takerTaxId,
+		legalName: z.string().trim().min(2, "Informe o nome ou a razão social."),
 		email: z.union([z.string().trim().toLowerCase().email("Informe um e-mail válido."), z.literal("")]),
 	}),
 	z.object({
