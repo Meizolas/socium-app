@@ -98,6 +98,7 @@ type Data = {
 	representations?: Item[];
 };
 type Draft = {
+	draftId: string;
 	takerId: string;
 	serviceProfileId: string;
 	competence: string;
@@ -135,6 +136,7 @@ type Draft = {
 	substitutionReason: string;
 };
 const emptyDraft: Draft = {
+	draftId: "",
 	takerId: "",
 	serviceProfileId: "",
 	competence: "2026-11-08",
@@ -256,6 +258,11 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 	}
 	function enterRepresentation(target:Item){setRepresentingIssuerId(target.id);setRepresentationNotice(true);setArea("overview");setDraft(emptyDraft);setStep(1)}
 	function leaveRepresentation(){setRepresentingIssuerId("");setRepresentationNotice(true);setArea("overview");setDraft(emptyDraft);setStep(1)}
+	function resumeDraft(source:Item){
+		const operation=source.operation||{},taxation=source.taxation||{},ibs=(taxation.ibsCbs||{}) as Record<string,unknown>,retentions=(taxation.federalRetentions||{}) as Record<string,unknown>;
+		setDraft({...emptyDraft,draftId:source.id,takerId:source.taker_id||"",serviceProfileId:source.service_profile_id||"",competence:source.competence||emptyDraft.competence,amount:Number(source.amount||0).toFixed(2),description:source.description||"",serviceMunicipalityIbge:String(operation.serviceMunicipalityIbge||""),serviceMunicipalityName:String(operation.serviceMunicipalityName||""),serviceMunicipalityUf:String(operation.serviceMunicipalityUf||""),additionalInformation:String(operation.additionalInformation||""),issTaxation:(taxation.issTaxation as Draft["issTaxation"])||"taxable",issWithholding:(taxation.issWithholding as Draft["issWithholding"])||"not_withheld",issRate:String(taxation.issRate||"2.00"),ibsCbsEnabled:Boolean(ibs.enabled),ibsCbsPurpose:String(ibs.purpose||"0"),ibsCbsOperationIndicator:String(ibs.operationIndicator||""),ibsCbsDestinationIndicator:String(ibs.destinationIndicator||"0"),ibsCbsTaxSituation:String(ibs.taxSituation||""),ibsCbsClassification:String(ibs.classification||""),ibsCbsBase:String(ibs.base||"0.00"),ibsUfRate:String(ibs.ibsUfRate||"0.00"),ibsMunicipalRate:String(ibs.ibsMunicipalRate||"0.00"),cbsRate:String(ibs.cbsRate||"0.00"),ibsCredit:String(ibs.ibsCredit||"0.00"),cbsCredit:String(ibs.cbsCredit||"0.00"),irRetention:String(retentions.ir||"0.00"),inssRetention:String(retentions.inss||"0.00"),pisRetention:String(retentions.pis||"0.00"),cofinsRetention:String(retentions.cofins||"0.00"),csllRetention:String(retentions.csll||"0.00")});
+		setResultId("");setStep(1);setArea("issue");setMessage("Rascunho carregado. Revise os dados antes de emitir.");
+	}
 	function startSubstitution(source:Item){
 		const operation=source.operation||{},taxation=source.taxation||{},ibs=(taxation.ibsCbs||{}) as Record<string,unknown>,retentions=(taxation.federalRetentions||{}) as Record<string,unknown>;
 		setDraft({...emptyDraft,takerId:source.taker_id||"",serviceProfileId:source.service_profile_id||"",competence:source.competence||emptyDraft.competence,amount:Number(source.amount||0).toFixed(2),description:source.description||"",serviceMunicipalityIbge:String(operation.serviceMunicipalityIbge||""),serviceMunicipalityName:String(operation.serviceMunicipalityName||""),serviceMunicipalityUf:String(operation.serviceMunicipalityUf||""),additionalInformation:String(operation.additionalInformation||""),issTaxation:(taxation.issTaxation as Draft["issTaxation"])||"taxable",issWithholding:(taxation.issWithholding as Draft["issWithholding"])||"not_withheld",issRate:String(taxation.issRate||"2.00"),ibsCbsEnabled:Boolean(ibs.enabled),ibsCbsPurpose:String(ibs.purpose||"0"),ibsCbsOperationIndicator:String(ibs.operationIndicator||""),ibsCbsDestinationIndicator:String(ibs.destinationIndicator||"0"),ibsCbsTaxSituation:String(ibs.taxSituation||""),ibsCbsClassification:String(ibs.classification||""),ibsCbsBase:String(ibs.base||"0.00"),ibsUfRate:String(ibs.ibsUfRate||"0.00"),ibsMunicipalRate:String(ibs.ibsMunicipalRate||"0.00"),cbsRate:String(ibs.cbsRate||"0.00"),ibsCredit:String(ibs.ibsCredit||"0.00"),cbsCredit:String(ibs.cbsCredit||"0.00"),irRetention:String(retentions.ir||"0.00"),inssRetention:String(retentions.inss||"0.00"),pisRetention:String(retentions.pis||"0.00"),cofinsRetention:String(retentions.cofins||"0.00"),csllRetention:String(retentions.csll||"0.00"),substitutionInvoiceId:source.id,substitutionKey:source.official_key||"",substitutionReasonCode:"99",substitutionReason:""});
@@ -336,6 +343,7 @@ export function NfseWorkspace({ onOpenModules }: { onOpenModules: () => void }) 
 							refresh={load}
 							canCancel={data.role === "admin" || data.role === "operator"}
 							onSubstitute={startSubstitution}
+							onResume={resumeDraft}
 						/>
 					)}{" "}
 					{area === "issue" && (
@@ -608,6 +616,7 @@ function Overview({
 	refresh,
 	canCancel,
 	onSubstitute,
+	onResume,
 }: {
 	invoices: Item[];
 	ready: boolean;
@@ -615,6 +624,7 @@ function Overview({
 	refresh: () => Promise<unknown>;
 	canCancel: boolean;
 	onSubstitute: (invoice:Item) => void;
+	onResume: (invoice:Item) => void;
 }) {
 	const drafts = invoices.filter((x) => x.status === "draft").length,
 		pending = invoices.filter((x) =>
@@ -657,7 +667,7 @@ function Overview({
 						<RefreshCw size={17} /> Atualizar
 					</button>
 				</div>
-				<InvoiceList invoices={invoices} refresh={refresh} canCancel={canCancel} onSubstitute={onSubstitute} />
+				<InvoiceList invoices={invoices} refresh={refresh} canCancel={canCancel} onSubstitute={onSubstitute} onResume={onResume} />
 			</section>
 		</>
 	);
@@ -676,6 +686,8 @@ function Metric({ label, value }: { label: string; value: number }) {
 	);
 }
 type Municipality = { ibgeCode: string; name: string; uf: string };
+type CatalogNbs = { code: string; description: string };
+type CatalogService = { code: string; formatted: string; item: string; description: string; nbs: CatalogNbs[] };
 const municipalitySearchCache = new Map<string, Municipality[]>();
 
 function fiscalText(value?: string) {
@@ -755,6 +767,33 @@ function MunicipalityFormPicker({ name, resetKey = 0 }: { name: string; resetKey
 function MunicipalityPicker({ draft, setDraft, error }: { draft: Draft; setDraft: (d: Draft) => void; error?: string }) {
 	const selected = draft.serviceMunicipalityIbge ? { ibgeCode: draft.serviceMunicipalityIbge, name: draft.serviceMunicipalityName, uf: draft.serviceMunicipalityUf } : null;
 	return <MunicipalitySearchField label="Município da prestação" selected={selected} onSelect={(option) => setDraft({ ...draft, serviceMunicipalityIbge: option.ibgeCode, serviceMunicipalityName: option.name, serviceMunicipalityUf: option.uf })} onClear={() => setDraft({ ...draft, serviceMunicipalityIbge: "", serviceMunicipalityName: "", serviceMunicipalityUf: "" })} error={error} />;
+}
+
+function ServiceCatalogPicker({ resetKey = 0 }: { resetKey?: number }) {
+	const [query, setQuery] = useState(""), [options, setOptions] = useState<CatalogService[]>([]), [selected, setSelected] = useState<CatalogService | null>(null);
+	const [open, setOpen] = useState(false), [searching, setSearching] = useState(false), [nbsQuery, setNbsQuery] = useState(""), [selectedNbs, setSelectedNbs] = useState<CatalogNbs | null>(null), [nbsOpen, setNbsOpen] = useState(false);
+	const serviceRef = useRef<HTMLLabelElement>(null), nbsRef = useRef<HTMLLabelElement>(null);
+	useEffect(() => { setQuery(""); setOptions([]); setSelected(null); setNbsQuery(""); setSelectedNbs(null); setOpen(false); setNbsOpen(false); }, [resetKey]);
+	useEffect(() => {
+		if (selected && query === selected.description) return;
+		const controller = new AbortController();
+		const timer = window.setTimeout(async () => {
+			setSearching(true);
+			try { const response = await fetch(`/api/nfse/service-catalog?q=${encodeURIComponent(query)}`, { signal: controller.signal }); const body = await response.json(); if (response.ok) setOptions(body.services || []); }
+			catch (error) { if (!(error instanceof Error && error.name === "AbortError")) setOptions([]); }
+			finally { if (!controller.signal.aborted) setSearching(false); }
+		}, 80);
+		return () => { window.clearTimeout(timer); controller.abort(); };
+	}, [query, selected]);
+	useEffect(() => { function close(event: PointerEvent) { const target = event.target as Node; if (serviceRef.current && !serviceRef.current.contains(target)) setOpen(false); if (nbsRef.current && !nbsRef.current.contains(target)) setNbsOpen(false); } document.addEventListener("pointerdown", close); return () => document.removeEventListener("pointerdown", close); }, []);
+	const normalizedNbs = nbsQuery.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+	const nbsOptions = (selected?.nbs || []).filter((item) => `${item.code} ${item.description}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(normalizedNbs)).slice(0, 12);
+	function choose(service: CatalogService) { const onlyNbs = service.nbs.length === 1 ? service.nbs[0] : null; setSelected(service); setQuery(service.description); setSelectedNbs(onlyNbs); setNbsQuery(onlyNbs ? `${onlyNbs.code} — ${onlyNbs.description}` : ""); setOpen(false); }
+	return <>
+		<input type="hidden" name="name" value={selected?.description || ""}/><input type="hidden" name="nationalCode" value={selected?.code || ""}/><input type="hidden" name="description" value={selected?.description || ""}/><input type="hidden" name="nbsCode" value={selectedNbs?.code || ""}/>
+		<label ref={serviceRef} className="wide nfse-catalog-picker">Serviço nacional *<div className="nfse-search-input"><Search size={17}/><input value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setSelected(null); setSelectedNbs(null); setNbsQuery(""); setOpen(true); }} placeholder="Digite o nome ou código do serviço" autoComplete="off" required/>{searching && <LoaderCircle className="nfse-spinner" size={17}/>}</div>{open && <div className="nfse-picker-options">{options.map((service) => <button type="button" key={service.code} onClick={() => choose(service)}><b>{service.description}</b><small>Código nacional {service.formatted}</small></button>)}{!searching && !options.length && <small>Nenhum serviço encontrado.</small>}</div>}{selected && <small className="nfse-selected">Selecionado: {selected.formatted} · {selected.description}</small>}</label>
+		<label ref={nbsRef} className="wide nfse-catalog-picker">NBS {selected?.nbs.length ? "*" : ""}<div className="nfse-search-input"><Search size={17}/><input value={nbsQuery} disabled={!selected || !selected.nbs.length} onFocus={() => setNbsOpen(true)} onChange={(event) => { setNbsQuery(event.target.value); setSelectedNbs(null); setNbsOpen(true); }} placeholder={!selected ? "Selecione primeiro o serviço" : selected.nbs.length ? "Digite o nome ou código NBS" : "Sem correlação NBS disponível"} autoComplete="off" required={Boolean(selected?.nbs.length)}/></div>{nbsOpen && selected && selected.nbs.length > 0 && <div className="nfse-picker-options">{nbsOptions.map((item) => <button type="button" key={item.code} onClick={() => { setSelectedNbs(item); setNbsQuery(`${item.code} — ${item.description}`); setNbsOpen(false); }}><b>{item.description}</b><small>NBS {item.code}</small></button>)}</div>}<small>{selected?.nbs.length && !selectedNbs ? `${selected.nbs.length} opção(ões) correlacionada(s); selecione a atividade realizada.` : selectedNbs ? `NBS selecionada: ${selectedNbs.code}` : "A correlação oficial é usada como auxílio e deve ser confirmada conforme a operação."}</small></label>
+	</>;
 }
 
 type IssueProps = { step: number; setStep: (n: number) => void; draft: Draft; setDraft: (d: Draft) => void; issuer?: Item; takers: Item[]; services: Item[]; cert?: Item; saveDraft: (e?: boolean) => Promise<void> | void; result?: Item; refresh: () => Promise<unknown>; busy: string; go: (a: Area) => void; simulation: boolean; production: boolean };
@@ -1133,6 +1172,7 @@ function Registrations({
 	busy: boolean;
 }) {
 	const [issuerFormKey, setIssuerFormKey] = useState(0);
+	const [serviceFormKey, setServiceFormKey] = useState(0);
 	const [takerTaxId, setTakerTaxId] = useState("");
 	return (
 		<>
@@ -1160,13 +1200,10 @@ function Registrations({
 					<h2>Serviços</h2>
 					<p className="hint">Perfis reutilizáveis para preenchimento automático da emissão.</p>
 					{issuer ? (
-						<form onSubmit={async (event) => { event.preventDefault(); const target = event.currentTarget; if (await submit("service", new FormData(target))) target.reset(); }}>
+						<form onSubmit={async (event) => { event.preventDefault(); const target = event.currentTarget; if (await submit("service", new FormData(target))) { target.reset(); setServiceFormKey((key) => key + 1); } }}>
 							<input type="hidden" name="issuerId" value={issuer.id} />
-							<label>Nome do serviço *<input name="name" placeholder="Ex.: Serviços de contabilidade" required /></label>
-							<label>Código nacional *<input name="nationalCode" placeholder="Ex.: 17.19.01" inputMode="numeric" pattern="(?:\D*\d){6}\D*" title="Informe exatamente os 6 dígitos do código de tributação nacional" required /><small>Informe os 6 dígitos do código de tributação nacional.</small></label>
-							<label>Código municipal <small>Opcional</small><input name="municipalCode" placeholder="Quando exigido pelo município" /></label>
-							<label>NBS <small>Opcional</small><input name="nbsCode" placeholder="Quando aplicável" /></label>
-							<label className="wide">Descrição fiscal *<input name="description" placeholder="Descrição usada nas novas emissões" required /></label>
+							<ServiceCatalogPicker resetKey={serviceFormKey} />
+							<label className="wide">Código municipal <small>Opcional e dependente do município</small><input name="municipalCode" placeholder="Preencha somente quando exigido pelo município" /></label>
 							<button disabled={busy}>{busy ? "Salvando…" : "Cadastrar serviço"}</button>
 						</form>
 					) : (
@@ -1474,7 +1511,7 @@ function CertificateSettings({
 		</>
 	);
 }
-function InvoiceList({ invoices, refresh, canCancel, onSubstitute }: { invoices: Item[]; refresh: () => Promise<unknown>; canCancel: boolean;onSubstitute:(invoice:Item)=>void }) {
+function InvoiceList({ invoices, refresh, canCancel, onSubstitute, onResume }: { invoices: Item[]; refresh: () => Promise<unknown>; canCancel: boolean;onSubstitute:(invoice:Item)=>void;onResume:(invoice:Item)=>void }) {
 	const [selected,setSelected]=useState<Item|null>(null),[reasonCode,setReasonCode]=useState("1"),[reason,setReason]=useState(""),[busy,setBusy]=useState(false),[feedback,setFeedback]=useState(""),[submitted,setSubmitted]=useState(false);
 	const current=selected?invoices.find(x=>x.id===selected.id)||selected:null,pending=submitted&&["queued","processing"].includes(current?.cancellation_status||""),succeeded=submitted&&current?.status==="cancelled",failed=submitted&&!pending&&!succeeded&&Boolean(current?.cancellation_error);
 	useEffect(()=>{if(!invoices.some(x=>["queued","processing"].includes(x.cancellation_status||"")))return;const timer=window.setInterval(()=>void refresh(),3000);return()=>window.clearInterval(timer)},[invoices,refresh]);
@@ -1488,6 +1525,7 @@ function InvoiceList({ invoices, refresh, canCancel, onSubstitute }: { invoices:
 				<li key={x.id}>
 					<span className="nfse-invoice-description">{displayFiscalText(x.description)}</span>
 					<span className={`nfse-status ${x.cancellation_status&&x.status!=="cancelled"?`cancellation-${x.cancellation_status}`:x.status}`}>{x.substituted_by_invoice_id?"Substituída":x.cancellation_status && x.status!=="cancelled" ? cancellationLabel(x.cancellation_status) : statusLabel(x.status)}</span>
+					{x.status === "draft" && <div className="nfse-invoice-downloads"><button className="nfse-artifact-link primary" type="button" onClick={() => onResume(x)}><FilePlus2 size={15}/> Continuar rascunho</button></div>}
 					{x.official_key && (
 						<div className="nfse-invoice-downloads">
 							<a className="nfse-artifact-link" href={`/api/nfse/invoices/${x.id}/xml`}><FileText size={15} /> XML</a>
