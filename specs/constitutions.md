@@ -474,3 +474,12 @@ specs/constitutions.md  Este documento
 - As migrations 017–020 fecham escopo de emitente/RLS, vínculos compostos, troca transacional de certificado, campos DPS 1.01, lease/fencing e outbox fiscal manual.
 - O worker privado possui adaptadores explícitos. O governamental exige ambiente 2, DPS validada por XSD, assinatura, mTLS, evidência anterior ao POST, reconciliação sem repost e Storage privado. Produção continua bloqueada.
 - O fluxo local integrado foi executado com Postgres, certificado sintético, worker persistente, provedor `SIMULATED_LOCAL`, download autenticado e isolamento entre escritórios/emitentes.
+
+### 18/11/2026 — Proteção da emissão por representação
+
+- A ativação de uma representação agora exige confirmação explícita de que a procuração eletrônica ou representação legal está vigente na Receita Federal.
+- A interface identifica claramente o titular do certificado e a empresa representada, orienta a conferência no portal oficial e impede a ativação sem a confirmação.
+- Respostas oficiais com o código `E0718` bloqueiam automaticamente a representação, registram auditoria e impedem novas tentativas até a regularização e reativação.
+- A migration `040_nfse_representation_guardrails.sql` também bloqueia representações ativas que já possuam tentativas históricas rejeitadas por `E0718`.
+- A mensagem de rejeição passou a informar a causa e a ação necessária, sem apresentar a falha como indisponibilidade técnica genérica.
+- Validação: `npm run build` e os 26 testes automatizados do emissor NFS-e concluídos com sucesso.

@@ -14,13 +14,14 @@ const input = z.object({
 	simpleNationalTaxationRegime: z.enum(["1", "2", "3"]),
 	specialTaxRegime: z.enum(["0", "1", "2", "3", "4", "5", "6"]),
 	certificateId: z.string().uuid(),
+	governmentAuthorizationConfirmed: z.literal(true),
 }).strict();
 
 export async function POST(request: Request) {
 	try {
 		const context = await requireAppContext(request, undefined, ["admin"]);
 		const parsed = input.safeParse(await request.json());
-		if (!parsed.success) return Response.json({ error: "Confira os dados da empresa representada." }, { status: 400 });
+		if (!parsed.success) return Response.json({ error: "Confira os dados e confirme que a autorização oficial da NFS-e está vigente." }, { status: 400 });
 		const value = parsed.data;
 		const setup = await supabaseForSession(request).rpc("complete_self_service_representation", {
 			p_represented_tax_id: value.taxId, p_legal_name: value.legalName,

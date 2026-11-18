@@ -10,6 +10,7 @@ const input = z.object({
 	allowClientIssuance: z.boolean().default(false),
 	allowCancellation: z.boolean().default(false),
 	validUntil: z.string().datetime().nullable().optional(),
+	governmentAuthorizationConfirmed: z.literal(true),
 }).strict();
 
 export async function GET(request: Request) {
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
 	try {
 		const context = await requireAppContext(request, "nfse", ["admin"]);
 		const parsed = input.safeParse(await request.json());
-		if (!parsed.success) return Response.json({ error: "Dados da representação inválidos." }, { status: 400 });
+		if (!parsed.success) return Response.json({ error: "Confirme que a procuração ou representação legal está vigente no ambiente oficial da NFS-e." }, { status: 400 });
 		const value = parsed.data;
 		requireIssuer(context, value.issuerId);
 		if (localMode()) {
@@ -48,16 +49,17 @@ export async function POST(request: Request) {
 				const issuer = await db.query("select tax_id from nfse_issuers where id=$1 and office_id=$2", [value.issuerId, context.officeId]);
 				if (String(issuer.rows[0]?.tax_id || "").replace(/\D/g, "") === String(certificate.rows[0].subject_tax_id || "").replace(/\D/g, ""))
 					throw Object.assign(new Error("Esta empresa usa certificado próprio e não precisa de representação."), { status: 409 });
-				const current = await db.query<{ id: string }>("select id from nfse_representations where issuer_id=$1 and representative_profile_id=$2 and status in ('pending','active') limit 1", [value.issuerId, context.userId]);
+				const current = await db.query<{ id: string }>("select id from nfse_representations where issuer_id=$1 and representative_profile_id=$2 and status in ('pending','active','suspended','verification_failed') order by updated_at desc limit 1", [value.issuerId, context.userId]);
 				if (current.rows[0]) {
-					await db.query("update nfse_representations set certificate_id=$2,authorization_type=$3,status='active',allow_client_issuance=$4,allow_cancellation=$5,valid_until=$6,updated_at=now() where id=$1", [current.rows[0].id, value.certificateId, value.authorizationType, value.allowClientIssuance, value.allowCancellation, value.validUntil || null]);
+					await db.query("update nfse_representations set certificate_id=$2,authorization_type=$3,status='active',allow_client_issuance=$4,allow_cancellation=$5,valid_until=$6,last_verification_error=null,updated_at=now() where id=$1", [current.rows[0].id, value.certificateId, value.authorizationType, value.allowClientIssuance, value.allowCancellation, value.validUntil || null]);
+					await db.query("insert into nfse_representation_audit(office_id,representation_id,issuer_id,actor_id,action,metadata) values($1,$2,$3,$4,'activated',jsonb_build_object('officialAuthorizationConfirmed',true))", [context.officeId, current.rows[0].id, value.issuerId, context.userId]);
 					return current.rows[0];
 				}
 				const saved = await db.query<{ id: string }>(
 					`insert into nfse_representations(office_id,issuer_id,representative_profile_id,certificate_id,authorization_type,status,allow_client_issuance,allow_cancellation,valid_until,created_by)
 					 values($1,$2,$3,$4,$5,'active',$6,$7,$8,$3) returning id`,
 					[context.officeId, value.issuerId, context.userId, value.certificateId, value.authorizationType, value.allowClientIssuance, value.allowCancellation, value.validUntil || null]);
-				await db.query("insert into nfse_representation_audit(office_id,representation_id,issuer_id,actor_id,action) values($1,$2,$3,$4,'created')", [context.officeId, saved.rows[0].id, value.issuerId, context.userId]);
+				await db.query("insert into nfse_representation_audit(office_id,representation_id,issuer_id,actor_id,action,metadata) values($1,$2,$3,$4,'created',jsonb_build_object('officialAuthorizationConfirmed',true))", [context.officeId, saved.rows[0].id, value.issuerId, context.userId]);
 				return saved.rows[0];
 			});
 			return Response.json(result, { status: 201 });
@@ -71,11 +73,12 @@ export async function POST(request: Request) {
 		if (!certificate.data) return Response.json({ error: "Certificado do representante não está ativo." }, { status: 409 });
 		if (String(issuer.data.tax_id || "").replace(/\D/g, "") === String(certificate.data.subject_tax_id || "").replace(/\D/g, ""))
 			return Response.json({ error: "Esta empresa usa certificado próprio e não precisa de representação." }, { status: 409 });
-		const current = await db.from("nfse_representations").select("id").eq("issuer_id", value.issuerId).eq("representative_profile_id", context.userId).in("status", ["pending", "active"]).limit(1).maybeSingle();
+		const current = await db.from("nfse_representations").select("id").eq("issuer_id", value.issuerId).eq("representative_profile_id", context.userId).in("status", ["pending", "active", "suspended", "verification_failed"]).order("updated_at", { ascending: false }).limit(1).maybeSingle();
 		if (current.error) throw new Error(current.error.message);
 		if (current.data) {
-			const updated = await db.from("nfse_representations").update({ certificate_id: value.certificateId, authorization_type: value.authorizationType, status: "active", allow_client_issuance: value.allowClientIssuance, allow_cancellation: value.allowCancellation, valid_until: value.validUntil || null, updated_at: new Date().toISOString() }).eq("id", current.data.id).select("id").single();
+			const updated = await db.from("nfse_representations").update({ certificate_id: value.certificateId, authorization_type: value.authorizationType, status: "active", allow_client_issuance: value.allowClientIssuance, allow_cancellation: value.allowCancellation, valid_until: value.validUntil || null, last_verification_error: null, updated_at: new Date().toISOString() }).eq("id", current.data.id).select("id").single();
 			if (updated.error) throw new Error(updated.error.message);
+			await db.from("nfse_representation_audit").insert({ office_id: context.officeId, representation_id: current.data.id, issuer_id: value.issuerId, actor_id: context.userId, action: "activated", metadata: { officialAuthorizationConfirmed: true } });
 			return Response.json(updated.data);
 		}
 		const saved = await db.from("nfse_representations").insert({
@@ -85,7 +88,7 @@ export async function POST(request: Request) {
 			valid_until: value.validUntil || null, created_by: context.userId,
 		}).select("id").single();
 		if (saved.error) throw new Error(saved.error.message);
-		await db.from("nfse_representation_audit").insert({ office_id: context.officeId, representation_id: saved.data.id, issuer_id: value.issuerId, actor_id: context.userId, action: "created" });
+		await db.from("nfse_representation_audit").insert({ office_id: context.officeId, representation_id: saved.data.id, issuer_id: value.issuerId, actor_id: context.userId, action: "created", metadata: { officialAuthorizationConfirmed: true } });
 		return Response.json(saved.data, { status: 201 });
 	} catch (error) { return authError(error); }
 }

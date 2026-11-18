@@ -1233,6 +1233,7 @@ type RepresentationRecord = {
 	id: string;
 	issuer_id: string;
 	status?: string;
+	last_verification_error?: string;
 	tax_id?: string;
 	legal_name?: string;
 	nfse_issuers?: { tax_id?: string; legal_name?: string } | Array<{ tax_id?: string; legal_name?: string }>;
@@ -1275,6 +1276,7 @@ function RepresentationWorkspace({ data, representativeIssuer, onRepresent, refr
 	const [candidate, setCandidate] = useState<Item | null>(null);
 	const [representations, setRepresentations] = useState<RepresentationRecord[]>([]);
 	const [confirmationCandidate,setConfirmationCandidate]=useState<Item|null>(null);
+	const [authorizationConfirmed,setAuthorizationConfirmed]=useState(false);
 	const [busy, setBusy] = useState(false);
 	const [lookupBusy, setLookupBusy] = useState(false);
 	const [feedback, setFeedback] = useState("");
@@ -1335,10 +1337,10 @@ function RepresentationWorkspace({ data, representativeIssuer, onRepresent, refr
 		if (!representativeCertificate) return setFeedback("Não há certificado ativo do escritório disponível para representar esta empresa.");
 		setBusy(true); setFeedback("");
 		try {
-			const representationResponse = await fetch("/api/nfse/representations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ issuerId: target.id, certificateId: representativeCertificate.id, authorizationType: "electronic_power_of_attorney", allowClientIssuance: true, allowCancellation: true }) });
+			const representationResponse = await fetch("/api/nfse/representations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ issuerId: target.id, certificateId: representativeCertificate.id, authorizationType: "electronic_power_of_attorney", allowClientIssuance: true, allowCancellation: true, governmentAuthorizationConfirmed: authorizationConfirmed }) });
 			const representationBody = await representationResponse.json();
 			if (!representationResponse.ok) throw new Error(representationBody.error || "Não foi possível cadastrar a representação.");
-			setFeedback(`Representação de ${target.legal_name} ativada.`);setConfirmationCandidate(null);
+			setFeedback(`Representação de ${target.legal_name} ativada. A validação definitiva ocorrerá na primeira resposta da SEFIN.`);setConfirmationCandidate(null);setAuthorizationConfirmed(false);
 			await Promise.all([loadRepresentations(), refresh()]);
 			onRepresent(target);
 		} catch (error) { setFeedback(error instanceof Error ? error.message : "Não foi possível concluir a configuração."); }
@@ -1366,12 +1368,12 @@ function RepresentationWorkspace({ data, representativeIssuer, onRepresent, refr
 				</div>
 				<button disabled={busy}>{busy ? "Cadastrando…" : "Cadastrar e continuar"}</button>
 			</form>}
-			{candidate&&candidateRepresentation&&<div className="nfse-representation-active"><Handshake size={24}/><div><strong>Representação ativa</strong><span>A SOCIUM pode emitir por {candidate.legal_name} usando o certificado de {representativeIssuer?.legal_name}.</span></div><button type="button" className="btn" onClick={()=>setConfirmationCandidate(candidate)}><LogIn size={17}/> Representar</button></div>}
+			{candidate&&candidateRepresentation&&<div className="nfse-representation-active"><Handshake size={24}/><div><strong>Representação ativa</strong><span>A SOCIUM pode emitir por {candidate.legal_name} usando o certificado de {representativeIssuer?.legal_name}.</span></div><button type="button" className="btn" onClick={()=>{setAuthorizationConfirmed(false);setConfirmationCandidate(candidate)}}><LogIn size={17}/> Representar</button></div>}
 			{feedback && <div className="nfse-inline-feedback" role="status">{feedback}</div>}
 			<div className="nfse-recent-representations"><h2>Representações recentes</h2>
-				{representations.length ? representations.map((record) => { const represented = representationIssuer(record); return <div className="nfse-recent-representation" key={record.id}><UserRound size={25} /><div><strong>{represented.legalName || "Empresa representada"}</strong><span>{formatTaxId(represented.taxId)}</span></div><button type="button" title="Representar esta empresa" onClick={() => { const item = data.issuers.find((issuer) => issuer.id === record.issuer_id); if(item)setConfirmationCandidate(item) }}><LogIn size={21} /></button></div>; }) : <p className="nfse-empty">Nenhuma representação cadastrada.</p>}
+				{representations.length ? representations.map((record) => { const represented = representationIssuer(record), blocked=record.status==="verification_failed"||record.status==="suspended"; return <div className={`nfse-recent-representation ${blocked?"blocked":""}`} key={record.id}><UserRound size={25} /><div><strong>{represented.legalName || "Empresa representada"}</strong><span>{formatTaxId(represented.taxId)} · {blocked?"Regularização necessária":record.status==="active"?"Ativa":"Pendente"}</span>{blocked&&<small>{record.last_verification_error||"Confirme a autorização no Portal de Serviços da Receita Federal."}</small>}</div><button type="button" title={blocked?"Regularizar representação":"Representar esta empresa"} onClick={() => { const item = data.issuers.find((issuer) => issuer.id === record.issuer_id); if(item){setAuthorizationConfirmed(false);setConfirmationCandidate(item)} }}><LogIn size={21} /></button></div>; }) : <p className="nfse-empty">Nenhuma representação cadastrada.</p>}
 			</div>
-			{confirmationCandidate&&<div className="nfse-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="representation-confirm-title"><section><button className="nfse-modal-close" type="button" aria-label="Fechar" onClick={()=>setConfirmationCandidate(null)}><X size={20}/></button><h2 id="representation-confirm-title"><ShieldCheck size={22}/> Confirmação</h2><p>Tem certeza que deseja representar <b>{confirmationCandidate.legal_name}</b> com o CPF/CNPJ <b>{formatTaxId(confirmationCandidate.tax_id)}</b>?</p><small>A procuração eletrônica ou representação legal deve estar previamente válida no ambiente oficial da NFS-e.</small><div><button type="button" className="btn" disabled={busy} onClick={()=>void confirmRepresentation()}>{busy?"Confirmando…":"Sim, representar"}</button><button type="button" className="btn secondary" onClick={()=>setConfirmationCandidate(null)}>Não</button></div></section></div>}
+			{confirmationCandidate&&<div className="nfse-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="representation-confirm-title"><section><button className="nfse-modal-close" type="button" aria-label="Fechar" onClick={()=>{setConfirmationCandidate(null);setAuthorizationConfirmed(false)}}><X size={20}/></button><h2 id="representation-confirm-title"><ShieldCheck size={22}/> Validar representação oficial</h2><div className="nfse-representation-parties"><p><small>Empresa representada</small><b>{confirmationCandidate.legal_name}</b><span>{formatTaxId(confirmationCandidate.tax_id)}</span></p><p><small>Titular do certificado</small><b>{representativeIssuer?.legal_name}</b><span>{formatTaxId(representativeIssuer?.tax_id)}</span></p></div><div className="nfse-official-authorization"><b>Antes de continuar</b><ol><li>Acesse o Portal de Serviços da Receita Federal.</li><li>Confira se a autorização foi concedida ao CNPJ acima.</li><li>Confirme que o serviço específico da NFS-e está selecionado e dentro da vigência.</li></ol><a href="https://servicos.receitafederal.gov.br/" target="_blank" rel="noreferrer">Abrir Portal da Receita Federal</a></div><label className="nfse-authorization-confirm"><input type="checkbox" checked={authorizationConfirmed} onChange={event=>setAuthorizationConfirmed(event.target.checked)}/><span>Confirmo que consultei o ambiente oficial e que a procuração eletrônica ou representação legal está vigente para este titular de certificado.</span></label><div><button type="button" className="btn" disabled={busy||!authorizationConfirmed} onClick={()=>void confirmRepresentation()}>{busy?"Confirmando…":"Ativar representação"}</button><button type="button" className="btn secondary" onClick={()=>{setConfirmationCandidate(null);setAuthorizationConfirmed(false)}}>Cancelar</button></div></section></div>}
 		</section>
 	</>;
 }
@@ -1482,13 +1484,14 @@ function CertificateSettings({
 				{data.certificates.some((item) => item.status === "active") ? <form onSubmit={async (event) => {
 					event.preventDefault(); setRepresentationBusy(true); setRepresentationFeedback("");
 					const values = new FormData(event.currentTarget);
-					const response = await fetch("/api/nfse/representations", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ issuerId:values.get("issuerId"), certificateId:values.get("certificateId"), authorizationType:"electronic_power_of_attorney", allowClientIssuance:values.get("allowClientIssuance")==="on", allowCancellation:true }) });
+					const response = await fetch("/api/nfse/representations", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ issuerId:values.get("issuerId"), certificateId:values.get("certificateId"), authorizationType:"electronic_power_of_attorney", allowClientIssuance:values.get("allowClientIssuance")==="on", allowCancellation:true, governmentAuthorizationConfirmed:values.get("governmentAuthorizationConfirmed")==="on" }) });
 					const body = await response.json(); setRepresentationFeedback(response.ok ? "Representação ativada. O certificado do escritório poderá assinar por esta empresa." : body.error || "Não foi possível cadastrar a representação.");
 					if (response.ok) await refresh(); setRepresentationBusy(false);
 				}}>
 					<label>Empresa representada *<select name="issuerId" defaultValue={issuer?.id || ""} required><option value="" disabled>Selecione o CNPJ representado</option>{data.issuers.map((item) => <option key={item.id} value={item.id}>{item.legal_name} - {item.tax_id}</option>)}</select></label>
 					<label>Certificado do representante *<select name="certificateId" required><option value="">Selecione o certificado</option>{data.certificates.filter((item) => item.status === "active").map((item) => <option key={item.id} value={item.id}>{item.subject_tax_id} - válido até {new Date(item.not_after || "").toLocaleDateString("pt-BR")}</option>)}</select></label>
 					<label className="wide"><input name="allowClientIssuance" type="checkbox" /> Permitir que o cliente solicite emissões usando esta representação</label>
+					<label className="wide"><input name="governmentAuthorizationConfirmed" type="checkbox" required /> Confirmo que a procuração ou representação legal está vigente no ambiente oficial da Receita Federal</label>
 					<button disabled={representationBusy}>{representationBusy ? "Salvando…" : "Cadastrar representação"}</button>
 				</form> : <p className="nfse-empty">Adicione primeiro o certificado A1 do escritório ou representante.</p>}
 				{representationFeedback && <div className="nfse-inline-feedback" role="status">{representationFeedback}</div>}

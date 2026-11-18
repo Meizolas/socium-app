@@ -76,7 +76,7 @@ export function FiscalOnboarding({ onLogout }: { onLogout: () => void }) {
 }
 
 function RepresentationSetup({ data, onLogout, embedded = false }: { data: Data; onLogout: () => void; embedded?: boolean }) {
-	const [busy, setBusy] = useState(false), [message, setMessage] = useState("");
+	const [busy, setBusy] = useState(false), [message, setMessage] = useState(""), [authorizationConfirmed,setAuthorizationConfirmed]=useState(false);
 	async function submit(event: React.FormEvent<HTMLFormElement>) {
 		event.preventDefault(); setBusy(true); setMessage("");
 		const values = new FormData(event.currentTarget);
@@ -86,6 +86,7 @@ function RepresentationSetup({ data, onLogout, embedded = false }: { data: Data;
 				municipalityIbge: values.get("municipalityIbge"), taxRegime: values.get("taxRegime"), dpsSeries: values.get("dpsSeries"),
 				simpleNationalOption: values.get("simpleNationalOption"), simpleNationalTaxationRegime: values.get("simpleNationalTaxationRegime"),
 				specialTaxRegime: values.get("specialTaxRegime"), certificateId: data.identityCertificate?.id,
+				governmentAuthorizationConfirmed: authorizationConfirmed,
 			}) });
 			const body = await response.json(); if (!response.ok) throw new Error(body.error || "Não foi possível ativar a representação.");
 			location.reload();
@@ -104,7 +105,7 @@ function RepresentationSetup({ data, onLogout, embedded = false }: { data: Data;
 			<label>Opção pelo Simples *<select name="simpleNationalOption" defaultValue="1"><option value="1">Não optante</option><option value="2">Optante — MEI</option><option value="3">Optante — ME/EPP</option></select></label>
 			<label>Apuração do Simples *<select name="simpleNationalTaxationRegime" defaultValue="1"><option value="1">Tributos federais e ISS pelo Simples</option><option value="2">Federais pelo Simples; ISS pela NFS-e</option><option value="3">Outro enquadramento autorizado</option></select></label>
 			<label>Regime especial *<select name="specialTaxRegime" defaultValue="0"><option value="0">Nenhum</option><option value="1">Microempresa municipal</option><option value="2">Estimativa</option><option value="3">Sociedade de profissionais</option><option value="4">Cooperativa</option><option value="5">MEI</option><option value="6">ME/EPP</option></select></label>
-		</div><button className="fiscal-primary" disabled={busy || !data.identityCertificate}>{busy ? "Ativando…" : "Ativar representação"}</button></form>
+		</div><div className="nfse-official-authorization"><b>Validação obrigatória</b><p>Confirme no Portal de Serviços da Receita Federal que o CNPJ representado concedeu autorização ao CPF/CNPJ {formatTaxId(data.entity.tax_id)} para o serviço específico da NFS-e.</p><a href="https://servicos.receitafederal.gov.br/" target="_blank" rel="noreferrer">Abrir Portal da Receita Federal</a></div><label className="nfse-official-confirm"><input type="checkbox" checked={authorizationConfirmed} onChange={event=>setAuthorizationConfirmed(event.target.checked)}/><span>Consultei o ambiente oficial e confirmo que a procuração eletrônica ou representação legal está vigente.</span></label><button className="fiscal-primary" disabled={busy || !data.identityCertificate || !authorizationConfirmed}>{busy ? "Ativando…" : "Ativar representação"}</button></form>
 		{message && <p className="auth-feedback">{message}</p>}{!embedded && <button className="module-logout" onClick={onLogout}>Sair da conta</button>}</>;
 	return embedded ? content : <main className="fiscal-setup-shell"><section className="fiscal-setup-card"><header><Image src="/api/logo?brand=helians-v1" alt="Helians" width={190} height={64} priority /><div><small>Primeiro acesso</small><h1>Configurar representação</h1></div></header>{content}</section></main>;
 }
