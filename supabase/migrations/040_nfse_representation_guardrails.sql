@@ -26,7 +26,7 @@ begin
  if error_0718 then
   update nfse_representations set
    status='verification_failed',
-   last_verification_error='E0718 — A Receita Federal não encontrou procuração eletrônica ou representação legal vigente para o titular do certificado.',
+   last_verification_error='E0718 - A Receita Federal não encontrou procuração eletrônica ou representação legal vigente para o titular do certificado.',
    updated_at=now()
   where id=inv.representation_id and status in ('pending','active','suspended');
   if found then
@@ -60,7 +60,7 @@ end $$;
 -- Quarantine representations for E0718 attempts that predate this trigger.
 update nfse_representations representation set
  status='verification_failed',
- last_verification_error='E0718 — A Receita Federal não encontrou procuração eletrônica ou representação legal vigente para o titular do certificado.',
+ last_verification_error='E0718 - A Receita Federal não encontrou procuração eletrônica ou representação legal vigente para o titular do certificado.',
  updated_at=now()
 where representation.status='active' and exists(
  select 1

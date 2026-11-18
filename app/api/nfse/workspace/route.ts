@@ -275,8 +275,8 @@ async function remoteWorkspace(c: Awaited<ReturnType<typeof requireAppContext>>)
 		const details=attempt.safe_details as Record<string,unknown>|null,errors=details?.erros;
 		const first=Array.isArray(errors)&&errors.length&&typeof errors[0]==="object"?errors[0] as Record<string,unknown>:null;
 		const code=first?.Codigo||first?.codigo,description=first?.Descricao||first?.descricao||details?.error||details?.message;
-		if(String(code).toUpperCase()==="E0718")issuanceErrors.set(attempt.invoice_id,"E0718 — A Receita Federal não encontrou procuração eletrônica ou representação legal vigente entre a empresa emitente e o titular do certificado. A representação foi bloqueada para evitar novas rejeições. Regularize a autorização no Portal de Serviços da Receita Federal e reative-a no Helians.");
-		else if(description)issuanceErrors.set(attempt.invoice_id,`${code?`${String(code)} — `:""}${String(description)}`);
+		if(String(code).toUpperCase()==="E0718")issuanceErrors.set(attempt.invoice_id,"E0718 - A Receita Federal não encontrou procuração eletrônica ou representação legal vigente entre a empresa emitente e o titular do certificado. A representação foi bloqueada para evitar novas rejeições. Regularize a autorização no Portal de Serviços da Receita Federal e reative-a no Helians.");
+		else if(description)issuanceErrors.set(attempt.invoice_id,`${code?`${String(code)} - `:""}${String(description)}`);
 	}
 	const now=Date.now(),issuerTaxIds=new Map((issuers.data||[]).map(x=>[x.id,String(x.tax_id||"").replace(/\D/g,"")]));
 	const cancellationReady=new Set((certificates.data||[]).filter(certificate=>certificate.status==="active"&&new Date(certificate.not_before).getTime()<=now&&new Date(certificate.not_after).getTime()>now).map(certificate=>certificate.issuer_id));
